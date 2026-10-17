@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Finch Local Chat"
+description = "A Windows-friendly local AI chat client with a browser UI, streaming conversations, model discovery, and Ollama connectivity. Inference stays on the user's PC via a compatible local runtime."
+version = "1.0.0"
+id = "artifacts/finch-local-chat"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20605
+
+[services.development]
+run = "pnpm --filter @workspace/finch-local-chat run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/finch-local-chat", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/finch-local-chat/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20605"
+BASE_PATH = "/"

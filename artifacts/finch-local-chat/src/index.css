@@ -1,0 +1,580 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-border: var(--primary-border);
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-secondary-border: var(--secondary-border);
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-muted-border: var(--muted-border);
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-accent-border: var(--accent-border);
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-destructive-border: var(--destructive-border);
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-primary-border: var(--sidebar-primary-border);
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-accent-border: var(--sidebar-accent-border);
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --font-sans: var(--app-font-sans);
+  --font-serif: var(--app-font-serif);
+  --font-mono: var(--app-font-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* LIGHT MODE */
+:root {
+  --button-outline: rgba(0, 0, 0, 0.1);
+  --badge-outline: rgba(0, 0, 0, 0.05);
+
+  /* Automatic computation of border around primary / danger buttons */
+  --opaque-button-border-intensity: -8; /* In terms of percentages */
+
+  /* Backgrounds applied on top of other backgrounds when hovered/active */
+  --elevate-1: rgba(0, 0, 0, 0.03);
+  --elevate-2: rgba(0, 0, 0, 0.08);
+
+  --background: 42 34% 96%;
+
+  --foreground: 203 28% 17%;
+
+  --border: 38 18% 86%;
+
+  --card: 42 38% 99%;
+
+  --card-foreground: 203 28% 17%;
+
+  --card-border: 38 18% 86%;
+
+  --sidebar: 201 30% 17%;
+
+  --sidebar-foreground: 40 25% 91%;
+
+  --sidebar-border: 201 23% 27%;
+
+  --sidebar-primary: 158 38% 52%;
+
+  --sidebar-primary-foreground: 203 31% 13%;
+
+  --sidebar-accent: 201 24% 23%;
+
+  --sidebar-accent-foreground: 40 25% 94%;
+
+  --sidebar-ring: 158 38% 52%;
+
+  --popover: 42 38% 99%;
+
+  --popover-foreground: 203 28% 17%;
+
+  --popover-border: 38 18% 86%;
+
+  --primary: 158 38% 38%;
+
+  --primary-foreground: 42 38% 98%;
+
+  --secondary: 158 25% 90%;
+
+  --secondary-foreground: 159 32% 24%;
+
+  --muted: 39 22% 91%;
+
+  --muted-foreground: 202 12% 48%;
+
+  --accent: 35 78% 87%;
+
+  --accent-foreground: 25 48% 28%;
+
+  --destructive: 4 57% 52%;
+
+  --destructive-foreground: 42 38% 98%;
+
+  --input: 38 18% 83%;
+  --ring: 158 38% 38%;
+  --chart-1: 158 38% 38%;
+  --chart-2: 35 78% 56%;
+  --chart-3: 202 35% 42%;
+  --chart-4: 4 57% 52%;
+  --chart-5: 278 20% 52%;
+
+  --app-font-sans: 'Manrope', sans-serif;
+  --app-font-serif: 'Manrope', sans-serif;
+  --app-font-mono: 'DM Mono', monospace;
+  --radius: 0.75rem;
+  --shadow-2xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0); /*replace with H S L */
+  --shadow-xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0); /*replace with H S L */
+  --shadow-sm:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-md:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 2px 4px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-lg:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 4px 6px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-xl:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 8px 10px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-2xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  /* Automatically computed borders - intensity can be controlled by the user by the --opaque-button-border-intensity setting */
+
+  /* Fallback for older browsers */
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-primary-border: hsl(
+    from hsl(var(--sidebar-primary)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  /* Fallback for older browsers */
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+  --sidebar-accent-border: hsl(
+    from hsl(var(--sidebar-accent)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  /* Fallback for older browsers */
+  --primary-border: hsl(var(--primary));
+  --primary-border: hsl(
+    from hsl(var(--primary)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  /* Fallback for older browsers */
+  --secondary-border: hsl(var(--secondary));
+  --secondary-border: hsl(
+    from hsl(var(--secondary)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  /* Fallback for older browsers */
+  --muted-border: hsl(var(--muted));
+  --muted-border: hsl(
+    from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) /
+      alpha
+  );
+
+  /* Fallback for older browsers */
+  --accent-border: hsl(var(--accent));
+  --accent-border: hsl(
+    from hsl(var(--accent)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  /* Fallback for older browsers */
+  --destructive-border: hsl(var(--destructive));
+  --destructive-border: hsl(
+    from hsl(var(--destructive)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+}
+
+.dark {
+  --button-outline: rgba(255, 255, 255, 0.1);
+  --badge-outline: rgba(255, 255, 255, 0.05);
+
+  --opaque-button-border-intensity: 9; /* In terms of percentages */
+
+  /* Backgrounds applied on top of other backgrounds when hovered/active */
+  --elevate-1: rgba(255, 255, 255, 0.04);
+  --elevate-2: rgba(255, 255, 255, 0.09);
+
+  --background: 203 29% 12%;
+
+  --foreground: 42 28% 92%;
+
+  --border: 203 17% 26%;
+
+  --card: 203 25% 15%;
+
+  --card-foreground: 42 28% 92%;
+
+  --card-border: 203 17% 26%;
+
+  --sidebar: 203 31% 9%;
+
+  --sidebar-foreground: 42 28% 92%;
+
+  --sidebar-border: 203 17% 21%;
+
+  --sidebar-primary: 158 42% 57%;
+
+  --sidebar-primary-foreground: 203 31% 9%;
+
+  --sidebar-accent: 203 22% 17%;
+
+  --sidebar-accent-foreground: 42 28% 92%;
+
+  --sidebar-ring: 158 42% 57%;
+
+  --popover: 203 25% 15%;
+
+  --popover-foreground: 42 28% 92%;
+
+  --popover-border: 203 17% 26%;
+
+  --primary: 158 42% 52%;
+
+  --primary-foreground: 203 31% 9%;
+
+  --secondary: 203 20% 22%;
+
+  --secondary-foreground: 42 28% 92%;
+
+  --muted: 203 20% 22%;
+
+  --muted-foreground: 203 12% 65%;
+
+  --accent: 35 47% 31%;
+
+  --accent-foreground: 42 28% 92%;
+
+  --destructive: 4 57% 52%;
+
+  --destructive-foreground: 42 38% 98%;
+
+  /* Used as the border around inputs. Dark mode: Should be a border that is light enough to have high contrast when rendered on a --card background. More contrast than standard --border */
+  --input: 203 17% 30%;
+  --ring: 158 42% 57%;
+  --chart-1: 158 42% 57%;
+  --chart-2: 35 78% 63%;
+  --chart-3: 202 35% 58%;
+  --chart-4: 4 57% 63%;
+  --chart-5: 278 20% 68%;
+
+  --shadow-2xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-sm:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-md:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 2px 4px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-lg:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 4px 6px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-xl:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 8px 10px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-2xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+:root {
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; background: hsl(var(--background)); }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+
+.app-shell { min-height: 100dvh; display: flex; background: #f4f1e9; color: #253640; }
+.sidebar {
+  width: 264px; flex: 0 0 264px; background: #20333d; color: #f3f0e7;
+  display: flex; flex-direction: column; padding: 23px 15px 16px; min-height: 100dvh;
+}
+.brand { display:flex; align-items:center; gap:11px; padding: 0 10px 24px; }
+.brand-mark { width: 34px; height:34px; border-radius: 11px; display:grid; place-items:center; color:#20333d; background:#a6d0b9; }
+.brand-name { font-size:17px; line-height:1.05; font-weight:800; letter-spacing:-.7px; }
+.brand-sub { color:#a8b7b9; font-size:10px; margin-top:4px; letter-spacing:.12em; text-transform:uppercase; }
+.side-action { border:1px solid #40535a; background:transparent; color:#f5f2ea; border-radius:9px; height:42px; display:flex; gap:10px; align-items:center; padding:0 12px; text-align:left; font-size:13px; font-weight:700; transition:background .18s, border-color .18s; }
+.side-action:hover { background:#2d444c; border-color:#5c7377; }
+.side-label { color:#85989b; font:500 10px 'DM Mono',monospace; letter-spacing:.12em; text-transform:uppercase; padding:25px 10px 10px; }
+.history-list { display:flex; flex-direction:column; gap:3px; overflow:auto; flex:1; }
+.history-item { min-height:39px; display:flex; align-items:center; gap:8px; border-radius:8px; padding:0 8px 0 11px; color:#c3ccca; background:transparent; border:0; text-align:left; width:100%; font-size:12px; }
+.history-item:hover,.history-item.active { background:#31474f; color:#fff; }
+.history-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.delete-chat { opacity:0; color:#b9c7c5; border:0; background:none; display:grid; place-items:center; padding:4px; border-radius:5px; }
+.history-item:hover .delete-chat,.delete-chat:focus-visible { opacity:1; }
+.delete-chat:hover { color:#f1a79d; background:#40535a; }
+.side-bottom { border-top:1px solid #405058; padding-top:13px; margin-top:13px; }
+.nav-link { display:flex; gap:10px; align-items:center; color:#b9c7c5; text-decoration:none; border-radius:8px; padding:10px 11px; font-size:13px; font-weight:650; }
+.nav-link:hover,.nav-link.selected { color:#fff; background:#31474f; }
+.local-note { display:flex; gap:9px; padding:14px 10px 3px; color:#a7b5b5; font-size:10px; line-height:1.5; }
+.local-note svg { flex:0 0 auto; color:#a6d0b9; margin-top:1px; }
+.main-area { flex:1; min-width:0; display:flex; flex-direction:column; min-height:100dvh; }
+.topbar { height:66px; flex:0 0 66px; display:flex; align-items:center; justify-content:space-between; padding:0 35px; border-bottom:1px solid #e3dfd5; background:rgba(250,248,242,.78); }
+.crumb { font-size:12px; color:#76858a; display:flex; align-items:center; gap:9px; }
+.crumb strong { color:#31454d; font-weight:750; }
+.runtime-pill { display:flex; gap:8px; align-items:center; padding:7px 10px; border:1px solid #dfded4; background:#faf8f2; border-radius:99px; font-size:11px; color:#617177; }
+.status-dot { height:7px; width:7px; border-radius:50%; background:#c48268; }
+.status-dot.online { background:#5f9d7c; box-shadow:0 0 0 3px #e3efe5; }
+.content { flex:1; min-height:0; display:flex; flex-direction:column; }
+.chat-page { height:100%; min-height:0; display:flex; flex-direction:column; }
+.chat-scroll { flex:1; overflow:auto; width:100%; }
+.chat-inner { width:min(860px, calc(100% - 48px)); margin:0 auto; padding:40px 0 30px; }
+.welcome { max-width:680px; margin:8vh auto 0; animation:rise .5s both; }
+.eyebrow { display:flex; align-items:center; gap:8px; font:500 10px 'DM Mono',monospace; letter-spacing:.13em; color:#63836f; text-transform:uppercase; }
+.welcome h1 { font-size:clamp(38px,5vw,58px); line-height:1.06; letter-spacing:-3.5px; margin:18px 0 15px; color:#253941; font-weight:700; }
+.welcome h1 span { color:#55866e; }
+.welcome-copy { max-width:490px; color:#758185; font-size:14px; line-height:1.75; }
+.welcome-line { width:58px; height:3px; background:#d6aa72; margin-top:30px; border-radius:3px; }
+.prompt-hints { display:flex; flex-wrap:wrap; gap:9px; margin-top:36px; }
+.hint { color:#52666c; background:#faf8f2; border:1px solid #e2ded3; border-radius:9px; padding:11px 13px; font-size:11px; transition:transform .18s,border-color .18s; }
+.hint:hover { transform:translateY(-2px); border-color:#9bb9a4; }
+.messages { display:flex; flex-direction:column; gap:28px; }
+.message-row { display:grid; grid-template-columns:34px minmax(0,1fr); gap:13px; animation:rise .25s both; }
+.message-avatar { width:31px; height:31px; display:grid; place-items:center; border-radius:10px; background:#e3ede5; color:#4c8062; }
+.message-avatar.user { background:#ece5d9; color:#987147; }
+.message-meta { color:#859094; font:500 10px 'DM Mono',monospace; letter-spacing:.03em; margin:1px 0 8px; }
+.message-content { color:#34454c; font-size:13px; line-height:1.8; white-space:pre-wrap; overflow-wrap:anywhere; }
+.message-content.user-content { color:#293941; font-weight:600; }
+.typing { color:#87958f; font-size:12px; }
+.composer-wrap { padding:15px 24px 18px; background:linear-gradient(0deg,#f4f1e9 75%,rgba(244,241,233,0)); }
+.composer { max-width:860px; margin:auto; background:#fbfaf5; border:1px solid #d9d7cc; box-shadow:0 8px 24px #34453b0b; border-radius:13px; padding:11px 12px 9px 15px; transition:border-color .2s,box-shadow .2s; }
+.composer:focus-within { border-color:#91b39d; box-shadow:0 0 0 3px #6f9e7d18; }
+.composer textarea { display:block; width:100%; resize:none; border:0; outline:0; background:transparent; min-height:46px; max-height:180px; padding:3px 0; color:#2d4047; font-size:13px; line-height:1.55; }
+.composer textarea::placeholder { color:#9aa3a0; }
+.composer-controls { display:flex; justify-content:space-between; align-items:center; }
+.composer-model { display:flex; gap:7px; align-items:center; color:#788681; font:10px 'DM Mono',monospace; }
+.send-button { border:0; border-radius:8px; background:#527d67; color:#fff; width:34px; height:32px; display:grid; place-items:center; transition:background .15s,transform .15s; }
+.send-button:hover { background:#3e6b54; transform:translateY(-1px); }
+.send-button:disabled { background:#cad3cc; cursor:not-allowed; transform:none; }
+.send-button.stop { background:#b66e61; }
+.send-button.stop:hover { background:#9f584d; }
+.composer-foot { max-width:860px; text-align:center; margin:9px auto 0; color:#9a9e96; font:9px 'DM Mono',monospace; letter-spacing:.03em; }
+.empty-conversation { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:55vh; text-align:center; color:#758185; }
+.empty-conversation h2 { font-size:22px; letter-spacing:-.8px; color:#30434a; margin:19px 0 8px; }
+.empty-conversation p { font-size:12px; line-height:1.65; max-width:340px; margin:0; }
+.settings-page { width:min(900px,calc(100% - 56px)); margin:0 auto; padding:42px 0 70px; }
+.settings-heading { margin-bottom:28px; }
+.settings-heading .eyebrow { margin-bottom:12px; }
+.settings-heading h1 { margin:0; color:#293e46; font-size:34px; letter-spacing:-1.6px; }
+.settings-heading p { color:#778487; font-size:13px; margin:9px 0 0; }
+.settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.settings-card { background:#faf8f2; border:1px solid #e1ddd2; border-radius:13px; padding:22px; }
+.settings-card.wide { grid-column:1/-1; }
+.card-title { display:flex; align-items:center; gap:10px; font-size:14px; font-weight:800; letter-spacing:-.2px; color:#35484e; margin:0 0 7px; }
+.card-icon { width:29px; height:29px; display:grid; place-items:center; border-radius:8px; background:#e7eee7; color:#5a866b; }
+.card-desc { color:#818b88; font-size:11px; line-height:1.65; margin:0 0 17px; }
+.connection-row { display:flex; align-items:center; justify-content:space-between; padding:13px 0; border-top:1px solid #ebe8df; }
+.connection-label { font-size:11px; color:#78837f; }
+.connection-value { display:flex; align-items:center; gap:7px; color:#52645e; font:11px 'DM Mono',monospace; }
+.refresh-button { display:flex; align-items:center; gap:7px; color:#527d67; background:transparent; border:0; font-size:11px; font-weight:700; padding:4px; }
+.refresh-button:hover { color:#345c46; }
+.inline-error { background:#f6e9e2; border:1px solid #edd5c9; border-radius:8px; color:#9a5d4e; font-size:11px; line-height:1.6; padding:10px 12px; margin-top:12px; }
+.setup-steps { display:flex; flex-direction:column; gap:14px; margin:15px 0 0; padding:0; list-style:none; counter-reset:step; }
+.setup-steps li { counter-increment:step; display:grid; grid-template-columns:24px 1fr; gap:10px; color:#687771; font-size:11px; line-height:1.7; }
+.setup-steps li::before { content:counter(step, decimal-leading-zero); color:#60856d; font:10px 'DM Mono',monospace; padding-top:2px; }
+.setup-steps strong { color:#35494c; }
+.code-chip { display:inline-block; background:#edece4; border:1px solid #e0ded5; padding:1px 6px; border-radius:4px; color:#4d6259; font:10px 'DM Mono',monospace; }
+.setting-control { padding:17px 0; border-top:1px solid #ebe8df; }
+.setting-control:first-of-type { border-top:0; }
+.setting-control-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.setting-control label { font-size:12px; font-weight:700; color:#495c60; }
+.setting-control output { color:#568168; font:11px 'DM Mono',monospace; }
+.setting-control input[type=range] { width:100%; accent-color:#5c8b6e; }
+.control-help { color:#99a09b; font-size:10px; margin-top:6px; }
+.model-select { width:100%; background:#f4f1e9; border:1px solid #ddd9ce; padding:11px 12px; color:#41545a; border-radius:8px; font-size:12px; outline-color:#78a489; }
+.model-info { color:#89938e; font:10px 'DM Mono',monospace; margin-top:8px; }
+.mobile-brand { display:none; }
+.loading-shimmer { height:12px; border-radius:5px; background:linear-gradient(90deg,#e6e4da,#f2f0e8,#e6e4da); background-size:200%; animation:shimmer 1.2s infinite; width:120px; }
+.no-models { border:1px dashed #d6d8cc; color:#7e8a84; border-radius:9px; padding:13px; font-size:11px; line-height:1.6; }
+@keyframes rise { from { opacity:0; transform:translateY(7px) } to { opacity:1; transform:translateY(0) } }
+@keyframes shimmer { to { background-position:-200% 0 } }
+@media (max-width: 760px) {
+  .app-shell { display:block; }
+  .sidebar { min-height:unset; width:100%; height:auto; padding:10px 14px 8px; flex-direction:row; flex-wrap:wrap; align-items:center; gap:8px; }
+  .brand { padding:0 4px; flex:1; }
+  .brand-mark { width:30px;height:30px; }
+  .brand-name { font-size:15px; }
+  .brand-sub { font-size:8px; }
+  .side-action { height:36px; font-size:11px; padding:0 9px; }
+  .side-action span { display:none; }
+  .side-label { display:none; }
+  .history-list { display:flex; flex:0 0 100%; flex-direction:row; gap:5px; height:32px; overflow-x:auto; order:3; }
+  .history-item { flex:0 0 auto; min-width:112px; width:auto; min-height:30px; padding:0 8px; font-size:10px; }
+  .history-item > .history-item { flex:1; min-width:0; width:auto; }
+  .delete-chat { opacity:1; }
+  .side-bottom { display:flex; flex:0 0 100%; order:4; border:0; padding:0; margin:0; gap:4px; }
+  .side-bottom .nav-link { padding:7px 9px; font-size:10px; }
+  .local-note { display:none; }
+  .main-area { min-height:calc(100dvh - 105px); }
+  .topbar { height:51px; flex-basis:51px; padding:0 17px; }
+  .chat-inner { width:calc(100% - 34px); padding:28px 0 22px; }
+  .welcome { margin-top:7vh; }
+  .welcome h1 { letter-spacing:-2.5px; }
+  .composer-wrap { padding:12px 13px 14px; }
+  .settings-page { width:calc(100% - 32px); padding:30px 0 50px; }
+  .settings-grid { grid-template-columns:1fr; }
+  .settings-card.wide { grid-column:auto; }
+}
+@media (max-width: 430px) {
+  .runtime-pill { font-size:10px; padding:6px 8px; }
+  .crumb { font-size:11px; }
+  .hint { font-size:10px; }
+}
+
+/**
+ * Using the elevate system.
+ * Automatic contrast adjustment.
+ *
+ * <element className="hover-elevate" />
+ * <element className="active-elevate-2" />
+ *
+ * // Using the tailwind utility when a data attribute is "on"
+ * <element className="toggle-elevate data-[state=on]:toggle-elevated" />
+ * // Or manually controlling the toggle state
+ * <element className="toggle-elevate toggle-elevated" />
+ *
+ * Elevation systems have to handle many states.
+ * - not-hovered, vs. hovered vs. active  (three mutually exclusive states)
+ * - toggled or not
+ * - focused or not (this is not handled with these utilities)
+ *
+ * Even without handling focused or not, this is six possible combinations that
+ * need to be distinguished from eachother visually.
+ */
+@layer utilities {
+  /* Hide ugly search cancel button in Chrome until we can style it properly */
+  input[type='search']::-webkit-search-cancel-button {
+    @apply hidden;
+  }
+
+  /* Placeholder styling for contentEditable div */
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+  }
+
+  /* .no-default-hover-elevate/no-default-active-elevate is an escape hatch so consumers of
+   * buttons/badges can remove the automatic brightness adjustment on interactions
+   * and program their own. */
+  .no-default-hover-elevate {
+  }
+
+  .no-default-active-elevate {
+  }
+
+  /**
+   * Toggleable backgrounds go behind the content. Hoverable/active goes on top.
+   * This way they can stack/compound. Both will overlap the parent's borders!
+   * So borders will be automatically adjusted both on toggle, and hover/active,
+   * and they will be compounded.
+   */
+  .toggle-elevate::before,
+  .toggle-elevate-2::before {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    /*border-radius: inherit;   match rounded corners */
+    border-radius: inherit;
+    z-index: -1;
+    /* sits behind content but above backdrop */
+  }
+
+  .toggle-elevate.toggle-elevated::before {
+    background-color: var(--elevate-2);
+  }
+
+  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
+  .border.toggle-elevate::before {
+    inset: -1px;
+  }
+
+  /* Does not work on elements with overflow:hidden! */
+  .hover-elevate:not(.no-default-hover-elevate),
+  .active-elevate:not(.no-default-active-elevate),
+  .hover-elevate-2:not(.no-default-hover-elevate),
+  .active-elevate-2:not(.no-default-active-elevate) {
+    position: relative;
+    z-index: 0;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate)::after,
+  .active-elevate:not(.no-default-active-elevate)::after,
+  .hover-elevate-2:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:not(.no-default-active-elevate)::after {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    /*border-radius: inherit;   match rounded corners */
+    border-radius: inherit;
+    z-index: 999;
+    /* sits in front of content */
+  }
+
+  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-1);
+  }
+
+  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-2);
+  }
+
+  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
+    inset: -1px;
+  }
+}
