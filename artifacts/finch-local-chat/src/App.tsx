@@ -1,20 +1,57 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Link, Route, Router, Switch, useLocation } from 'wouter';
 import {
-  Activity, ArrowUp, Bot, CircleHelp, Cpu, Database, FileText, LockKeyhole,
-  MessageSquare, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal,
-  Square, Trash2, WifiOff,
+  Activity, ArrowUp, Bot, CheckCircle2, CircleHelp, Cpu, Database, FileText,
+  Image as ImageIcon, LockKeyhole, MessageSquare, Mic, Play, Plus, RefreshCw,
+  Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Square, Trash2, Users,
+  Volume2, WifiOff,
 } from 'lucide-react';
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string; createdAt: string };
-type Conversation = { id: string; title: string; createdAt: string; updatedAt: string; messages: Message[] };
+type Conversation = { id: string; title: string; createdAt: string; updatedAt: string; messages: Message[]; personaId?: number };
 type Model = { name: string; model: string; size: number; modified_at: string };
-type Preferences = { temperature: number; num_predict: number; model: string };
+type Preferences = { temperature: number; num_predict: number; model: string; activeVoice: string; activePersonaId: number | null };
 type Runtime = { version: string | null; models: Model[]; loading: boolean; error: string | null };
+
+type AiGirlPersona = {
+  id: number;
+  name: string;
+  description: string;
+  image_url: string;
+  voice_url: string;
+  prompt?: string;
+  voice_text?: string;
+  voice_id?: string;
+  model?: string;
+  created_at: string;
+};
+
+type LuStatus = {
+  ollama: { running: boolean; version: string | null; models: string[] };
+  comfyui: { installed: boolean; path: string | null; running: boolean; url: string; logs: string[] };
+  voice: { available: boolean; engine: string; voices: string[] };
+  database: { postgresConfigured: boolean; supabaseConfigured: boolean; supabaseUrl: string };
+  catalog: {
+    text: Array<{ name: string; tag: string; size: string; vram: string; notes: string }>;
+    image: Array<{ name: string; vram: string; notes: string }>;
+    voices: string[];
+  };
+};
 
 const CONVERSATIONS_KEY = 'finch-local-chat-conversations-v1';
 const PREFERENCES_KEY = 'finch-local-chat-preferences-v1';
-const DEFAULT_PREFERENCES: Preferences = { temperature: 0.7, num_predict: 1024, model: '' };
+const DEFAULT_PREFERENCES: Preferences = {
+  temperature: 0.7,
+  num_predict: 1024,
+  model: '',
+  activeVoice: 'Alba',
+  activePersonaId: null,
+};
+
+const DEFAULT_VOICES = [
+  'Alba', 'Anna', 'Azelma', 'Charles', 'Eponine', 'Eve', 'Fantine',
+  'George', 'Jane', 'Javert', 'Marius', 'Mary', 'Michael', 'Paul', 'Vera',
+];
 
 function readConversations(): Conversation[] {
   try {
@@ -47,21 +84,45 @@ function formatBytes(bytes: number) {
 }
 
 function Workspace() {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const [conversations, setConversations] = useState<Conversation[]>(readConversations);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<Preferences>(readPreferences);
   const [runtime, setRuntime] = useState<Runtime>({ version: null, models: [], loading: true, error: null });
+  const [luStatus, setLuStatus] = useState<LuStatus | null>(null);
+  const [personas, setPersonas] = useState<AiGirlPersona[]>([]);
+  const [storageEngine, setStorageEngine] = useState<string>('local_json');
+
+  // Chat state
   const [draft, setDraft] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+
+  // Create Studio & Persona form state (pre-populated with user's AI Girl snippet)
+  const [personaName, setPersonaName] = useState('AI Girl');
+  const [personaDesc, setPersonaDesc] = useState('A sexy and intelligent AI girl with a mysterious past.');
+  const [artPrompt, setArtPrompt] = useState('Create an image of a sexy AI girl with long, wavy hair, wearing a revealing outfit, standing in a futuristic cityscape.');
+  const [voiceText, setVoiceText] = useState("Hello, I am AI Girl. I'm here to make your dreams come true.");
+  const [selectedVoice, setSelectedVoice] = useState('Alba');
+  const [generatingPersona, setGeneratingPersona] = useState(false);
+  const [generatingArtOnly, setGeneratingArtOnly] = useState(false);
+  const [generatingVoiceOnly, setGeneratingVoiceOnly] = useState(false);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string>('');
+  const [previewVoiceUrl, setPreviewVoiceUrl] = useState<string>('');
+  const [studioStatusMsg, setStudioStatusMsg] = useState<string | null>(null);
+
+  // Supabase config state
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseKey, setSupabaseKey] = useState('');
+  const [supabaseSavedMsg, setSupabaseSavedMsg] = useState<string | null>(null);
+
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
   const activeConversation = conversations.find((conversation) => conversation.id === activeId) || null;
-  const onSettings = location === '/settings';
+  const activePersona = personas.find((p) => p.id === preferences.activePersonaId) || null;
   const connected = Boolean(runtime.version);
-  const localRuntimeEnabled = import.meta.env.VITE_FINCH_LOCAL_RUNTIME === 'true';
 
   useEffect(() => {
     localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
@@ -71,16 +132,27 @@ function Workspace() {
     localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
   }, [preferences]);
 
-  const loadRuntime = useCallback(async () => {
-    if (!localRuntimeEnabled) {
-      setRuntime({
-        version: null,
-        models: [],
-        loading: false,
-        error: "The Replit preview can't reach Ollama on your PC. Run Finch Local Chat locally on Windows to use your models.",
-      });
-      return;
+  const loadLuStudio = useCallback(async () => {
+    try {
+      const [statusRes, girlsRes] = await Promise.all([
+        fetch('/api/lu/status'),
+        fetch('/api/lu/ai-girls'),
+      ]);
+      if (statusRes.ok) {
+        const statusData = (await statusRes.json()) as LuStatus;
+        setLuStatus(statusData);
+      }
+      if (girlsRes.ok) {
+        const girlsData = (await girlsRes.json()) as { items: AiGirlPersona[]; storage: string };
+        setPersonas(girlsData.items || []);
+        setStorageEngine(girlsData.storage || 'local_json');
+      }
+    } catch {
+      /* API server might be starting */
     }
+  }, []);
+
+  const loadRuntime = useCallback(async () => {
     setRuntime((current) => ({ ...current, loading: true, error: null }));
     const [versionResult, modelsResult] = await Promise.allSettled([
       fetch('/ollama/api/version').then(async (response) => {
@@ -97,7 +169,7 @@ function Workspace() {
       ? modelsResult.value.models : [];
     const errors: string[] = [];
     if (versionResult.status === 'rejected') {
-      errors.push("Ollama isn't responding at its configured address. Start Ollama on this PC and try again.");
+      errors.push("Ollama isn't responding at 127.0.0.1:11434. Start Ollama on this PC or use Create & Voice Studio.");
     } else if (modelsResult.status === 'rejected') {
       errors.push("Ollama is responding, but its installed model list couldn't be loaded.");
     }
@@ -106,9 +178,12 @@ function Workspace() {
       const preferredAvailable = models.some((model) => model.name === current.model || model.model === current.model);
       return { ...current, model: preferredAvailable ? current.model : (models[0]?.name || models[0]?.model || '') };
     });
-  }, [localRuntimeEnabled]);
+  }, []);
 
-  useEffect(() => { void loadRuntime(); }, [loadRuntime]);
+  useEffect(() => {
+    void loadRuntime();
+    void loadLuStudio();
+  }, [loadRuntime, loadLuStudio]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -120,11 +195,19 @@ function Workspace() {
 
   const createConversation = () => {
     const now = new Date().toISOString();
-    const conversation: Conversation = { id: makeId(), title: 'New conversation', createdAt: now, updatedAt: now, messages: [] };
+    const conversation: Conversation = {
+      id: makeId(),
+      title: activePersona ? `Chat with ${activePersona.name}` : 'New conversation',
+      createdAt: now,
+      updatedAt: now,
+      messages: [],
+      personaId: activePersona?.id,
+    };
     setConversations((items) => [conversation, ...items]);
     setActiveId(conversation.id);
     setChatError(null);
     setDraft('');
+    if (location !== '/') setLocation('/');
   };
 
   const deleteConversation = (id: string) => {
@@ -142,14 +225,31 @@ function Workspace() {
     let conversation = activeConversation;
     if (!conversation) {
       const now = new Date().toISOString();
-      conversation = { id: makeId(), title: content.slice(0, 48), createdAt: now, updatedAt: now, messages: [] };
+      conversation = {
+        id: makeId(),
+        title: content.slice(0, 48),
+        createdAt: now,
+        updatedAt: now,
+        messages: [],
+        personaId: activePersona?.id,
+      };
       setConversations((items) => [conversation!, ...items]);
       setActiveId(conversation.id);
     }
     const conversationId = conversation.id;
     const userMessage: Message = { id: makeId(), role: 'user', content, createdAt: new Date().toISOString() };
     const assistantMessage: Message = { id: makeId(), role: 'assistant', content: '', createdAt: new Date().toISOString() };
-    const requestMessages = [...conversation.messages, userMessage].map(({ role, content: messageContent }) => ({ role, content: messageContent }));
+
+    const systemPrompts = activePersona
+      ? [{ role: 'system' as const, content: `You are ${activePersona.name}. ${activePersona.description} Answer directly and stay in character without unnecessary refusals.` }]
+      : [];
+
+    const requestMessages = [
+      ...systemPrompts,
+      ...conversation.messages.map(({ role, content: messageContent }) => ({ role, content: messageContent })),
+      { role: userMessage.role, content: userMessage.content },
+    ];
+
     setDraft('');
     setChatError(null);
     setStreaming(true);
@@ -159,6 +259,7 @@ function Workspace() {
       updatedAt: userMessage.createdAt,
       messages: [...item.messages, userMessage, assistantMessage],
     }));
+
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -201,17 +302,6 @@ function Workspace() {
         }
         if (done) finished = true;
       }
-      if (buffer.trim()) {
-        const chunk = JSON.parse(buffer) as { message?: { content?: string }; done?: boolean; error?: string };
-        if (chunk.error) throw new Error(chunk.error);
-        if (chunk.message?.content) {
-          const addition = chunk.message.content;
-          updateConversation(conversationId, (item) => ({
-            ...item,
-            messages: item.messages.map((message) => message.id === assistantMessage.id ? { ...message, content: message.content + addition } : message),
-          }));
-        }
-      }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         updateConversation(conversationId, (item) => ({
@@ -232,6 +322,119 @@ function Workspace() {
     }
   };
 
+  const handleGenerateArtOnly = async () => {
+    if (!artPrompt.trim()) return;
+    setGeneratingArtOnly(true);
+    setStudioStatusMsg('Generating AI art via ComfyUI / Local Studio...');
+    try {
+      const res = await fetch('/api/lu/generate-art', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: artPrompt, name: personaName }),
+      });
+      const data = (await res.json()) as { image_url?: string; provider?: string; error?: string };
+      if (!res.ok || !data.image_url) throw new Error(data.error || 'Failed to generate image');
+      setPreviewImageUrl(data.image_url);
+      setStudioStatusMsg(`Artwork generated (${data.provider === 'comfyui' ? 'Local ComfyUI' : 'Local Studio Renderer'}).`);
+    } catch (err) {
+      setStudioStatusMsg(err instanceof Error ? err.message : 'Art generation error');
+    } finally {
+      setGeneratingArtOnly(false);
+    }
+  };
+
+  const handleGenerateVoiceOnly = async () => {
+    if (!voiceText.trim()) return;
+    setGeneratingVoiceOnly(true);
+    setStudioStatusMsg(`Synthesizing voice (${selectedVoice}) locally...`);
+    try {
+      const res = await fetch('/api/lu/generate-voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: voiceText, voice: selectedVoice }),
+      });
+      const data = (await res.json()) as { voice_url?: string; provider?: string; error?: string };
+      if (!res.ok || !data.voice_url) throw new Error(data.error || 'Failed to generate voice');
+      setPreviewVoiceUrl(data.voice_url);
+      setStudioStatusMsg(`Voice synthesized (${data.provider === 'windows_sapi_tts' ? 'Local Windows SAPI TTS' : 'Local Synth WAV'}).`);
+    } catch (err) {
+      setStudioStatusMsg(err instanceof Error ? err.message : 'Voice generation error');
+    } finally {
+      setGeneratingVoiceOnly(false);
+    }
+  };
+
+  const handleCreateAiGirlPersona = async (e: FormEvent) => {
+    e.preventDefault();
+    setGeneratingPersona(true);
+    setStudioStatusMsg('Generating AI art + voice and saving to database / Supabase...');
+    try {
+      const res = await fetch('/api/lu/ai-girls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: personaName,
+          description: personaDesc,
+          prompt: artPrompt,
+          voice_text: voiceText,
+          voice_id: selectedVoice,
+          model: preferences.model || 'Qwen 3.8 27B Uncensored',
+          image_url: previewImageUrl || undefined,
+          voice_url: previewVoiceUrl || undefined,
+        }),
+      });
+      const data = (await res.json()) as {
+        girl?: AiGirlPersona;
+        storage?: string;
+        supabaseSynced?: boolean;
+        supabaseError?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.girl) throw new Error(data.error || 'Failed to save AI Girl persona');
+      setPreviewImageUrl(data.girl.image_url);
+      setPreviewVoiceUrl(data.girl.voice_url);
+      const supaNote = data.supabaseSynced
+        ? ' + synced to Supabase `ai_girls` table!'
+        : data.supabaseError
+          ? ` (Supabase error: ${data.supabaseError})`
+          : '';
+      setStudioStatusMsg(`Created "${data.girl.name}" in ${data.storage}${supaNote}`);
+      await loadLuStudio();
+    } catch (err) {
+      setStudioStatusMsg(err instanceof Error ? err.message : 'Failed to create persona');
+    } finally {
+      setGeneratingPersona(false);
+    }
+  };
+
+  const handleDeletePersona = async (id: number) => {
+    await fetch(`/api/lu/ai-girls/${id}`, { method: 'DELETE' });
+    if (preferences.activePersonaId === id) {
+      updatePreference('activePersonaId', null);
+    }
+    await loadLuStudio();
+  };
+
+  const handleSaveSupabaseConfig = async (e: FormEvent) => {
+    e.preventDefault();
+    const res = await fetch('/api/lu/supabase-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: supabaseUrl, key: supabaseKey }),
+    });
+    if (res.ok) {
+      setSupabaseSavedMsg('Supabase credentials saved! New AI Girl personas will automatically insert into `ai_girls`.');
+      await loadLuStudio();
+    }
+  };
+
+  const handleStartComfy = async () => {
+    const res = await fetch('/api/lu/comfyui/start', { method: 'POST' });
+    const data = (await res.json()) as { status?: string; error?: string };
+    setStudioStatusMsg(data.error || `ComfyUI: ${data.status}`);
+    await loadLuStudio();
+  };
+
   const submit = (event: FormEvent) => { event.preventDefault(); void sendMessage(); };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); }
@@ -240,178 +443,600 @@ function Workspace() {
     setPreferences((current) => ({ ...current, [key]: value }));
   };
 
-  return (
-      <div className="app-shell">
-        <aside className="sidebar">
-          <div className="brand">
-            <div className="brand-mark"><Cpu size={19} strokeWidth={2.2} /></div>
-            <div><div className="brand-name">finch</div><div className="brand-sub">local workspace</div></div>
-          </div>
-          <button className="side-action" data-testid="button-new-conversation" onClick={createConversation}>
-            <Plus size={16} /><span>New conversation</span>
-          </button>
-          <div className="side-label">Your conversations</div>
-          <div className="history-list" data-testid="list-conversations">
-            {conversations.length === 0 && <div style={{ padding: '8px 10px', color: '#839496', fontSize: 11 }}>Your chats will live here.</div>}
-            {conversations.map((conversation) => (
-              <div key={conversation.id} className={`history-item ${activeId === conversation.id ? 'active' : ''}`} data-testid={`conversation-item-${conversation.id}`}>
-                <button className="history-item" style={{ padding: 0, minHeight: 'unset', flex: 1, width: 'auto' }} onClick={() => { setActiveId(conversation.id); setChatError(null); }} data-testid={`button-select-conversation-${conversation.id}`}>
-                  <MessageSquare size={13} /><span className="history-title">{conversation.title}</span>
-                </button>
-                <button className="delete-chat" aria-label={`Delete ${conversation.title}`} title="Delete conversation" onClick={() => deleteConversation(conversation.id)} data-testid={`button-delete-conversation-${conversation.id}`}><Trash2 size={13} /></button>
-              </div>
-            ))}
-          </div>
-          <div className="side-bottom">
-            <Link href="/" className={`nav-link ${!onSettings ? 'selected' : ''}`} data-testid="link-chat"><MessageSquare size={15} />Chat</Link>
-            <Link href="/settings" className={`nav-link ${onSettings ? 'selected' : ''}`} data-testid="link-settings"><Settings2 size={15} />Settings</Link>
-            <div className="local-note"><LockKeyhole size={14} /><span>Your messages stay on this device and go directly to your local model.</span></div>
-          </div>
-        </aside>
+  const pageTitle =
+    location === '/create' ? 'Create & Personas (LU Studio)' :
+    location === '/voice' ? 'Voice (Beta)' :
+    location === '/settings' ? 'Settings & Supabase' : 'Chat';
 
-        <main className="main-area">
-          <header className="topbar">
-            <div className="crumb"><span>Finch</span><span>/</span><strong>{onSettings ? 'Settings' : 'Chat'}</strong></div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {!onSettings && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#72817e' }}>
-                  <span style={{ font: '9px "DM Mono",monospace', textTransform: 'uppercase', letterSpacing: '.08em' }}>Model</span>
-                  <select aria-label="Choose model" className="model-select" style={{ width: 'auto', minWidth: 105, padding: '7px 27px 7px 9px', fontSize: 10 }} value={preferences.model} onChange={(event) => updatePreference('model', event.target.value)} disabled={runtime.models.length === 0} data-testid="select-model">
-                    {runtime.models.length === 0 && <option value="">No models</option>}
-                    {runtime.models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
-                  </select>
-                </label>
-              )}
-              <div className="runtime-pill" data-testid="status-runtime">
-                <span className={`status-dot ${connected ? 'online' : ''}`} />
-                <span>{runtime.loading ? 'Checking runtime' : connected ? `Ollama ${runtime.version}` : 'Runtime offline'}</span>
-              </div>
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark"><Cpu size={19} strokeWidth={2.2} /></div>
+          <div>
+            <div className="brand-name">finch + LU</div>
+            <div className="brand-sub">locally uncensored</div>
+          </div>
+        </div>
+        <button className="side-action" data-testid="button-new-conversation" onClick={createConversation}>
+          <Plus size={16} /><span>New conversation</span>
+        </button>
+
+        {activePersona && (
+          <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 8, background: '#2d444c', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Persona: <strong>{activePersona.name}</strong>
+            </span>
+            <button onClick={() => updatePreference('activePersonaId', null)} style={{ background: 'none', border: 0, color: '#f1a79d', fontSize: 10 }}>Clear</button>
+          </div>
+        )}
+
+        <div className="side-label">Your conversations</div>
+        <div className="history-list" data-testid="list-conversations">
+          {conversations.length === 0 && <div style={{ padding: '8px 10px', color: '#839496', fontSize: 11 }}>Your chats will live here.</div>}
+          {conversations.map((conversation) => (
+            <div key={conversation.id} className={`history-item ${activeId === conversation.id ? 'active' : ''}`} data-testid={`conversation-item-${conversation.id}`}>
+              <button className="history-item" style={{ padding: 0, minHeight: 'unset', flex: 1, width: 'auto' }} onClick={() => { setActiveId(conversation.id); setChatError(null); if (location !== '/') setLocation('/'); }} data-testid={`button-select-conversation-${conversation.id}`}>
+                <MessageSquare size={13} /><span className="history-title">{conversation.title}</span>
+              </button>
+              <button className="delete-chat" aria-label={`Delete ${conversation.title}`} title="Delete conversation" onClick={() => deleteConversation(conversation.id)} data-testid={`button-delete-conversation-${conversation.id}`}><Trash2 size={13} /></button>
             </div>
-          </header>
-          <div className="content">
-            <Switch>
-              <Route path="/">
-                <section className="chat-page" aria-label="Local chat">
-                  <div className="chat-scroll" ref={scrollRef} data-testid="chat-message-list">
-                    <div className="chat-inner">
-                      {activeConversation?.messages.length ? (
-                        <div className="messages">
-                          {activeConversation.messages.map((message) => (
-                            <article className="message-row" key={message.id} data-testid={`message-${message.id}`}>
-                              <div className={`message-avatar ${message.role === 'user' ? 'user' : ''}`}>{message.role === 'user' ? <FileText size={15} /> : <Bot size={16} />}</div>
-                              <div>
-                                <div className="message-meta">{message.role === 'user' ? 'YOU' : 'FINCH'} · {formatTime(message.createdAt)}</div>
-                                {message.content ? <div className={`message-content ${message.role === 'user' ? 'user-content' : ''}`}>{message.content}</div> : streaming && <div className="typing" data-testid="status-generating">Thinking locally…</div>}
+          ))}
+        </div>
+
+        <div className="side-bottom">
+          <Link href="/" className={`nav-link ${location === '/' ? 'selected' : ''}`} data-testid="link-chat">
+            <MessageSquare size={15} />Chat
+          </Link>
+          <Link href="/create" className={`nav-link ${location === '/create' ? 'selected' : ''}`} data-testid="link-create">
+            <Sparkles size={15} />Create & AI Girls
+          </Link>
+          <Link href="/voice" className={`nav-link ${location === '/voice' ? 'selected' : ''}`} data-testid="link-voice">
+            <Mic size={15} />Voice (Beta)
+          </Link>
+          <Link href="/settings" className={`nav-link ${location === '/settings' ? 'selected' : ''}`} data-testid="link-settings">
+            <Settings2 size={15} />Settings
+          </Link>
+          <div className="local-note">
+            <LockKeyhole size={14} />
+            <span>Locally Uncensored Studio integrated: local chat, ComfyUI image gen, 15 voices & Supabase sync.</span>
+          </div>
+        </div>
+      </aside>
+
+      <main className="main-area">
+        <header className="topbar">
+          <div className="crumb">
+            <span>Finch + Locally Uncensored</span><span>/</span><strong>{pageTitle}</strong>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {location === '/' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#72817e' }}>
+                <span style={{ font: '9px "DM Mono",monospace', textTransform: 'uppercase', letterSpacing: '.08em' }}>Persona</span>
+                <select
+                  aria-label="Choose persona"
+                  className="model-select"
+                  style={{ width: 'auto', minWidth: 110, padding: '7px 20px 7px 9px', fontSize: 10 }}
+                  value={preferences.activePersonaId ?? ''}
+                  onChange={(e) => updatePreference('activePersonaId', e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">Default Assistant</option>
+                  {personas.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#72817e' }}>
+              <span style={{ font: '9px "DM Mono",monospace', textTransform: 'uppercase', letterSpacing: '.08em' }}>Model</span>
+              <select
+                aria-label="Choose model"
+                className="model-select"
+                style={{ width: 'auto', minWidth: 115, padding: '7px 24px 7px 9px', fontSize: 10 }}
+                value={preferences.model}
+                onChange={(event) => updatePreference('model', event.target.value)}
+                disabled={runtime.models.length === 0}
+                data-testid="select-model"
+              >
+                {runtime.models.length === 0 && <option value="">No models</option>}
+                {runtime.models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
+              </select>
+            </label>
+            <div className="runtime-pill" data-testid="status-runtime">
+              <span className={`status-dot ${connected ? 'online' : ''}`} />
+              <span>{runtime.loading ? 'Checking runtime' : connected ? `Ollama ${runtime.version}` : 'Ollama offline'}</span>
+            </div>
+          </div>
+        </header>
+
+        <div className="content">
+          <Switch>
+            {/* ============================================================ */}
+            {/* CHAT SURFACE                                                 */}
+            {/* ============================================================ */}
+            <Route path="/">
+              <section className="chat-page" aria-label="Local chat">
+                <div className="chat-scroll" ref={scrollRef} data-testid="chat-message-list">
+                  <div className="chat-inner">
+                    {activeConversation?.messages.length ? (
+                      <div className="messages">
+                        {activeConversation.messages.map((message) => (
+                          <article className="message-row" key={message.id} data-testid={`message-${message.id}`}>
+                            <div className={`message-avatar ${message.role === 'user' ? 'user' : ''}`}>
+                              {message.role === 'user' ? <FileText size={15} /> : <Bot size={16} />}
+                            </div>
+                            <div>
+                              <div className="message-meta">
+                                {message.role === 'user' ? 'YOU' : (activePersona?.name.toUpperCase() || 'FINCH')} · {formatTime(message.createdAt)}
                               </div>
-                            </article>
+                              {message.content ? (
+                                <div className={`message-content ${message.role === 'user' ? 'user-content' : ''}`}>
+                                  {message.content}
+                                </div>
+                              ) : (
+                                streaming && <div className="typing" data-testid="status-generating">Thinking locally…</div>
+                              )}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="welcome">
+                        <div className="eyebrow">
+                          <span className={`status-dot ${connected ? 'online' : ''}`} />
+                          Finch + Locally Uncensored Studio
+                        </div>
+                        <h1>Think clearly.<br /><span>Create freely.</span></h1>
+                        <p className="welcome-copy">
+                          Your local AI workspace combining Finch Local Chat with Locally Uncensored: direct uncensored models, local ComfyUI art generation, 15 English voices, and AI Girl persona persistence with Supabase & PostgreSQL.
+                        </p>
+                        <div className="welcome-line" />
+                        <div className="prompt-hints">
+                          <button className="hint" onClick={() => setLocation('/create')}>
+                            <Sparkles size={12} style={{ display: 'inline', marginRight: 6 }} />
+                            Open AI Girl & Image Studio
+                          </button>
+                          <button className="hint" onClick={() => setLocation('/voice')}>
+                            <Mic size={12} style={{ display: 'inline', marginRight: 6 }} />
+                            Open Voice Synthesis (15 LU Voices)
+                          </button>
+                          {['Roleplay as AI Girl in a cyberpunk city', 'Write a Python script for local ComfyUI', 'Summarize a passage'].map((hint) => (
+                            <button key={hint} className="hint" onClick={() => { setDraft(hint); textareaRef.current?.focus(); }}>
+                              {hint}
+                            </button>
                           ))}
                         </div>
+                        {!runtime.loading && !connected && (
+                          <div className="inline-error" role="status" data-testid="status-chat-disconnected">
+                            Ollama isn’t running right now, but you can still use <strong>Create & AI Girls</strong> and <strong>Voice (Beta)</strong> in the sidebar!
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="composer-wrap">
+                  {chatError && <div className="inline-error" style={{ maxWidth: 860, margin: '0 auto 10px' }} role="alert" data-testid="status-chat-error">{chatError}</div>}
+                  <form className="composer" onSubmit={submit}>
+                    <textarea
+                      ref={textareaRef}
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder={connected ? `Message ${activePersona ? activePersona.name : 'your local model'}…` : 'Start Ollama to chat, or switch to Create & AI Girls in the sidebar'}
+                      aria-label="Message your local model"
+                      data-testid="input-chat-message"
+                      disabled={!connected || !preferences.model || streaming}
+                    />
+                    <div className="composer-controls">
+                      <div className="composer-model">
+                        <LockKeyhole size={12} />
+                        <span>{preferences.model || 'No model selected'} {activePersona ? `· Persona: ${activePersona.name}` : ''}</span>
+                      </div>
+                      {streaming ? (
+                        <button type="button" className="send-button stop" onClick={stopGeneration} aria-label="Stop generation" title="Stop generation" data-testid="button-stop-generation">
+                          <Square size={13} fill="currentColor" />
+                        </button>
                       ) : (
-                        <div className="welcome">
-                          <div className="eyebrow"><span className={`status-dot ${connected ? 'online' : ''}`} />A quieter kind of AI</div>
-                          <h1>Think clearly.<br /><span>Stay local.</span></h1>
-                          <p className="welcome-copy">A private space to work with the models running on your own PC. Your words stay on your machine, from first prompt to final thought.</p>
-                          <div className="welcome-line" />
-                          {runtime.models.length > 0 && (
-                            <div className="prompt-hints">
-                              {['Help me untangle an idea', 'Summarize a passage', 'Draft a quick outline'].map((hint) => (
-                                <button key={hint} className="hint" onClick={() => { setDraft(hint); textareaRef.current?.focus(); }} data-testid={`button-prompt-${hint.toLowerCase().replaceAll(' ', '-')}`}>{hint}</button>
-                              ))}
-                            </div>
-                          )}
-                          {!runtime.loading && !connected && <div className="inline-error" role="status" data-testid="status-chat-disconnected">Finch can’t reach Ollama yet. Start Ollama on this PC, then check the connection in Settings.</div>}
-                          {!runtime.loading && connected && runtime.models.length === 0 && <div className="no-models" data-testid="status-no-models">Ollama is responding, but no models are installed. Follow the Windows setup steps in Settings to pull your first model.</div>}
+                        <button type="submit" className="send-button" disabled={!draft.trim() || !connected || !preferences.model} aria-label="Send message" title="Send message" data-testid="button-send-message">
+                          <ArrowUp size={17} />
+                        </button>
+                      )}
+                    </div>
+                  </form>
+                  <div className="composer-foot">LOCAL MODEL · NO CLOUD ROUTING · SHIFT + ENTER FOR A NEW LINE</div>
+                </div>
+              </section>
+            </Route>
+
+            {/* ============================================================ */}
+            {/* CREATE & AI GIRLS STUDIO (LOCALLY UNCENSORED + SUPABASE)     */}
+            {/* ============================================================ */}
+            <Route path="/create">
+              <section className="settings-page" style={{ maxWidth: 1020 }}>
+                <div className="settings-heading">
+                  <div className="eyebrow"><Sparkles size={13} />Locally Uncensored Studio + Supabase</div>
+                  <h1>Create & AI Girls Studio</h1>
+                  <p>Generate AI art (ComfyUI / Local Renderer) & voice clips (15 LU Voices), and store personas in PostgreSQL & Supabase (`ai_girls`).</p>
+                </div>
+
+                {studioStatusMsg && (
+                  <div style={{ background: '#e3efe5', border: '1px solid #b8d8be', color: '#2b593f', padding: '11px 15px', borderRadius: 10, fontSize: 12, marginBottom: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <CheckCircle2 size={15} />
+                    <span>{studioStatusMsg}</span>
+                  </div>
+                )}
+
+                <div className="settings-grid">
+                  {/* Generator Form */}
+                  <form className="settings-card" onSubmit={handleCreateAiGirlPersona} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <h2 className="card-title"><span className="card-icon"><ImageIcon size={15} /></span>Create AI Girl Persona</h2>
+                    <p className="card-desc" style={{ marginBottom: 4 }}>
+                      Directly executes your <code>insert_ai_girl_data(name, description, image_url, voice_url)</code> workflow locally and syncs to Supabase.
+                    </p>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Name</label>
+                      <input
+                        className="model-select"
+                        value={personaName}
+                        onChange={(e) => setPersonaName(e.target.value)}
+                        placeholder="AI Girl"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Description / Persona Backstory</label>
+                      <textarea
+                        className="model-select"
+                        rows={2}
+                        value={personaDesc}
+                        onChange={(e) => setPersonaDesc(e.target.value)}
+                        placeholder="A sexy and intelligent AI girl with a mysterious past."
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Image Generation Prompt (ComfyUI / Local Art)</label>
+                      <textarea
+                        className="model-select"
+                        rows={3}
+                        value={artPrompt}
+                        onChange={(e) => setArtPrompt(e.target.value)}
+                        placeholder="Describe the image to generate..."
+                        required
+                      />
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 10 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Greeting Voice Line</label>
+                        <input
+                          className="model-select"
+                          value={voiceText}
+                          onChange={(e) => setVoiceText(e.target.value)}
+                          placeholder="Hello, I am AI Girl..."
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>LU Voice (15)</label>
+                        <select
+                          className="model-select"
+                          value={selectedVoice}
+                          onChange={(e) => setSelectedVoice(e.target.value)}
+                        >
+                          {(luStatus?.voice.voices || DEFAULT_VOICES).map((v) => (
+                            <option key={v} value={v}>{v}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                      <button
+                        type="button"
+                        onClick={handleGenerateArtOnly}
+                        disabled={generatingArtOnly || generatingPersona}
+                        style={{ padding: '9px 13px', borderRadius: 8, border: '1px solid #84a993', background: '#eef5f0', color: '#355c47', fontSize: 11, fontWeight: 700 }}
+                      >
+                        {generatingArtOnly ? 'Generating Art…' : '1. Preview AI Art'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleGenerateVoiceOnly}
+                        disabled={generatingVoiceOnly || generatingPersona}
+                        style={{ padding: '9px 13px', borderRadius: 8, border: '1px solid #84a993', background: '#eef5f0', color: '#355c47', fontSize: 11, fontWeight: 700 }}
+                      >
+                        {generatingVoiceOnly ? 'Synthesizing…' : '2. Preview AI Voice'}
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={generatingPersona}
+                        style={{ flex: 1, padding: '9px 15px', borderRadius: 8, border: 0, background: '#527d67', color: '#fff', fontSize: 12, fontWeight: 700 }}
+                        data-testid="button-create-ai-girl"
+                      >
+                        {generatingPersona ? 'Generating & Saving…' : 'Generate & Save AI Girl'}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Live Preview & ComfyUI Status */}
+                  <div className="settings-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 14 }}>
+                    <div>
+                      <h2 className="card-title"><span className="card-icon"><Sparkles size={15} /></span>Live Studio Preview</h2>
+                      <p className="card-desc">
+                        ComfyUI status: <strong>{luStatus?.comfyui.running ? 'Running on :8188' : luStatus?.comfyui.installed ? 'Installed (Stopped)' : 'Using Local Studio SVG Fallback'}</strong>
+                        {' · '}Storage: <strong>{storageEngine}</strong>
+                        {luStatus?.database.supabaseConfigured ? ' + Supabase Sync Active' : ''}
+                      </p>
+
+                      <div style={{ borderRadius: 11, overflow: 'hidden', border: '1px solid #dcd8cc', background: '#121824', aspectRatio: '1 / 1', maxHeight: 280, margin: '0 auto', display: 'grid', placeItems: 'center' }}>
+                        <img
+                          src={previewImageUrl || personas[0]?.image_url || '/api/lu/media/default-persona.svg'}
+                          alt="Generated AI Girl preview"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      </div>
+
+                      {(previewVoiceUrl || personas[0]?.voice_url) && (
+                        <div style={{ marginTop: 12, background: '#f1efe7', padding: '10px 12px', borderRadius: 9, display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <Volume2 size={16} color="#527d67" />
+                          <audio controls src={previewVoiceUrl || personas[0]?.voice_url} style={{ height: 32, flex: 1 }} />
                         </div>
                       )}
                     </div>
+
+                    <div style={{ borderTop: '1px solid #ebe8df', paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: '#78837f' }}>
+                        {luStatus?.comfyui.path ? `ComfyUI: ${luStatus.comfyui.path}` : 'ComfyUI auto-discovery active'}
+                      </span>
+                      {luStatus?.comfyui.installed && !luStatus?.comfyui.running && (
+                        <button type="button" className="refresh-button" onClick={handleStartComfy}>
+                          <Play size={13} /> Launch ComfyUI
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="composer-wrap">
-                    {chatError && <div className="inline-error" style={{ maxWidth: 860, margin: '0 auto 10px' }} role="alert" data-testid="status-chat-error">{chatError}</div>}
-                    <form className="composer" onSubmit={submit}>
-                      <textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleKeyDown} placeholder={connected ? 'Message your local model…' : 'Start Ollama to begin a local conversation'} aria-label="Message your local model" data-testid="input-chat-message" disabled={!connected || !preferences.model || streaming} />
-                      <div className="composer-controls">
-                        <div className="composer-model"><LockKeyhole size={12} /><span>{preferences.model || 'No model selected'}</span></div>
-                        {streaming ? (
-                          <button type="button" className="send-button stop" onClick={stopGeneration} aria-label="Stop generation" title="Stop generation" data-testid="button-stop-generation"><Square size={13} fill="currentColor" /></button>
-                        ) : (
-                          <button type="submit" className="send-button" disabled={!draft.trim() || !connected || !preferences.model} aria-label="Send message" title="Send message" data-testid="button-send-message"><ArrowUp size={17} /></button>
-                        )}
+
+                  {/* Saved AI Girl Personas Gallery */}
+                  <section className="settings-card wide">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                      <div>
+                        <h2 className="card-title"><span className="card-icon"><Users size={15} /></span>Saved AI Girls (`ai_girls` Table)</h2>
+                        <p className="card-desc" style={{ marginBottom: 0 }}>Click "Chat as Persona" to load any character into your local chat session.</p>
                       </div>
+                      <button className="refresh-button" onClick={() => void loadLuStudio()}>
+                        <RefreshCw size={13} /> Refresh Gallery
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+                      {personas.map((girl) => (
+                        <div key={girl.id} style={{ background: '#f4f1e9', border: '1px solid #dedad0', borderRadius: 11, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ height: 190, background: '#0e131f', position: 'relative' }}>
+                            <img src={girl.image_url} alt={girl.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(15,23,42,0.75)', color: '#e2e8f0', padding: '3px 8px', borderRadius: 99, fontSize: 10, fontFamily: 'monospace' }}>
+                              Voice: {girl.voice_id || 'Alba'}
+                            </span>
+                          </div>
+                          <div style={{ padding: 13, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 10 }}>
+                            <div>
+                              <div style={{ fontWeight: 800, fontSize: 14, color: '#293e46' }}>{girl.name}</div>
+                              <div style={{ fontSize: 11, color: '#69777b', marginTop: 4, lineHeight: 1.5 }}>{girl.description}</div>
+                            </div>
+                            {girl.voice_url && (
+                              <audio controls src={girl.voice_url} style={{ width: '100%', height: 28 }} />
+                            )}
+                            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  updatePreference('activePersonaId', girl.id);
+                                  setLocation('/');
+                                }}
+                                style={{ flex: 1, padding: '7px 10px', borderRadius: 7, border: 0, background: '#527d67', color: '#fff', fontSize: 11, fontWeight: 700 }}
+                              >
+                                Chat as {girl.name}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeletePersona(girl.id)}
+                                title="Delete persona"
+                                style={{ padding: '7px 9px', borderRadius: 7, border: '1px solid #dfcfc9', background: '#f8ece8', color: '#9a5d4e' }}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              </section>
+            </Route>
+
+            {/* ============================================================ */}
+            {/* VOICE (BETA) SURFACE - 15 ENGLISH VOICES FROM LU             */}
+            {/* ============================================================ */}
+            <Route path="/voice">
+              <section className="settings-page">
+                <div className="settings-heading">
+                  <div className="eyebrow"><Mic size={13} />Locally Uncensored Voice Engine</div>
+                  <h1>Voice Studio <span style={{ fontSize: 14, background: '#e3efe5', color: '#427257', padding: '3px 9px', borderRadius: 99, verticalAlign: 'middle' }}>Beta</span></h1>
+                  <p>Speak in 15 English voices from Locally Uncensored (`VOICE.md`). Synthesizes audio locally on your PC.</p>
+                </div>
+
+                <div className="settings-grid">
+                  <section className="settings-card wide">
+                    <h2 className="card-title"><span className="card-icon"><Volume2 size={15} /></span>Synthesize Speech Locally</h2>
+                    <p className="card-desc">Pick any of the 15 English voices (Alba is default) and test local voice synthesis.</p>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(95px, 1fr))', gap: 8, marginBottom: 16 }}>
+                      {(luStatus?.voice.voices || DEFAULT_VOICES).map((voiceName) => (
+                        <button
+                          key={voiceName}
+                          type="button"
+                          onClick={() => {
+                            setSelectedVoice(voiceName);
+                            updatePreference('activeVoice', voiceName);
+                          }}
+                          style={{
+                            padding: '9px 10px',
+                            borderRadius: 8,
+                            border: selectedVoice === voiceName ? '2px solid #527d67' : '1px solid #ddd9ce',
+                            background: selectedVoice === voiceName ? '#e6f0e9' : '#f4f1e9',
+                            color: '#2d4047',
+                            fontSize: 12,
+                            fontWeight: selectedVoice === voiceName ? 800 : 600,
+                          }}
+                        >
+                          {voiceName}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                      <input
+                        className="model-select"
+                        style={{ flex: 1 }}
+                        value={voiceText}
+                        onChange={(e) => setVoiceText(e.target.value)}
+                        placeholder="Type a sentence for the voice engine to speak..."
+                      />
+                      <button
+                        type="button"
+                        onClick={handleGenerateVoiceOnly}
+                        disabled={generatingVoiceOnly}
+                        style={{ padding: '11px 18px', borderRadius: 8, border: 0, background: '#527d67', color: '#fff', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}
+                      >
+                        {generatingVoiceOnly ? 'Synthesizing…' : `Listen (${selectedVoice})`}
+                      </button>
+                    </div>
+
+                    {previewVoiceUrl && (
+                      <div style={{ marginTop: 16, padding: 12, borderRadius: 9, background: '#f1efe7', display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <Volume2 size={18} color="#527d67" />
+                        <audio controls autoPlay src={previewVoiceUrl} style={{ flex: 1, height: 34 }} />
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="settings-card wide">
+                    <h2 className="card-title"><span className="card-icon"><Database size={15} /></span>Uncensored Model Catalog (from Locally Uncensored)</h2>
+                    <p className="card-desc">Recommended abliterated & uncensored models for local Ollama and ComfyUI.</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8 }}>Text / Chat Models (Ollama)</div>
+                        {(luStatus?.catalog.text || []).map((m) => (
+                          <div key={m.name} style={{ padding: '8px 0', borderTop: '1px solid #ebe8df', fontSize: 11 }}>
+                            <strong>{m.name}</strong> <span className="code-chip">{m.size}</span>
+                            <div style={{ color: '#78837f', marginTop: 2 }}>{m.notes}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8 }}>Image Models (ComfyUI)</div>
+                        {(luStatus?.catalog.image || []).map((m) => (
+                          <div key={m.name} style={{ padding: '8px 0', borderTop: '1px solid #ebe8df', fontSize: 11 }}>
+                            <strong>{m.name}</strong> <span className="code-chip">{m.vram} VRAM</span>
+                            <div style={{ color: '#78837f', marginTop: 2 }}>{m.notes}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </section>
+            </Route>
+
+            {/* ============================================================ */}
+            {/* SETTINGS & SUPABASE CONFIGURATION                            */}
+            {/* ============================================================ */}
+            <Route path="/settings">
+              <section className="settings-page">
+                <div className="settings-heading">
+                  <div className="eyebrow"><SlidersHorizontal size={13} />Workspace controls</div>
+                  <h1>Settings</h1>
+                  <p>Connection, Supabase sync, local ComfyUI & Ollama model behavior.</p>
+                </div>
+                <div className="settings-grid">
+                  <section className="settings-card" data-testid="card-runtime-status">
+                    <h2 className="card-title"><span className="card-icon"><Activity size={15} /></span>Runtime connection</h2>
+                    <p className="card-desc">Finch talks to Ollama, ComfyUI, and your local TTS engine.</p>
+                    <div className="connection-row"><span className="connection-label">Ollama Status</span><span className="connection-value" data-testid="text-connection-status"><span className={`status-dot ${connected ? 'online' : ''}`} />{runtime.loading ? 'Checking…' : connected ? `Connected (${runtime.version})` : 'Not connected'}</span></div>
+                    <div className="connection-row"><span className="connection-label">ComfyUI (:8188)</span><span className="connection-value"><span className={`status-dot ${luStatus?.comfyui.running ? 'online' : ''}`} />{luStatus?.comfyui.running ? 'Running' : luStatus?.comfyui.installed ? 'Installed (Idle)' : 'Local Studio Fallback'}</span></div>
+                    <div className="connection-row"><span className="connection-label">Installed Ollama models</span><span className="connection-value" data-testid="text-model-count">{runtime.loading ? 'Checking…' : `${runtime.models.length} models`}</span></div>
+                    <button className="refresh-button" onClick={() => { void loadRuntime(); void loadLuStudio(); }} disabled={runtime.loading} style={{ marginTop: 12 }} data-testid="button-refresh-runtime">
+                      <RefreshCw size={13} className={runtime.loading ? 'spin' : ''} />Check connections
+                    </button>
+                  </section>
+
+                  <section className="settings-card">
+                    <h2 className="card-title"><span className="card-icon"><Database size={15} /></span>Supabase `ai_girls` Integration</h2>
+                    <p className="card-desc">Configure your Supabase URL & API Key to sync generated AI Girl personas directly to your cloud `ai_girls` table.</p>
+                    <form onSubmit={handleSaveSupabaseConfig} style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                      <input
+                        className="model-select"
+                        placeholder="https://your-project.supabase.co"
+                        value={supabaseUrl}
+                        onChange={(e) => setSupabaseUrl(e.target.value)}
+                      />
+                      <input
+                        className="model-select"
+                        type="password"
+                        placeholder="YOUR_SUPABASE_KEY (anon / service_role)"
+                        value={supabaseKey}
+                        onChange={(e) => setSupabaseKey(e.target.value)}
+                      />
+                      <button type="submit" style={{ padding: '9px 14px', borderRadius: 8, border: 0, background: '#527d67', color: '#fff', fontSize: 11, fontWeight: 700 }}>
+                        Save Supabase Credentials
+                      </button>
+                      {supabaseSavedMsg && <div style={{ fontSize: 11, color: '#3b6e52' }}>{supabaseSavedMsg}</div>}
                     </form>
-                    <div className="composer-foot">LOCAL MODEL · NO CLOUD ROUTING · SHIFT + ENTER FOR A NEW LINE</div>
-                  </div>
-                </section>
-              </Route>
-              <Route path="/settings">
-                <section className="settings-page">
-                  <div className="settings-heading">
-                    <div className="eyebrow"><SlidersHorizontal size={13} />Workspace controls</div>
-                    <h1>Settings</h1>
-                    <p>Connection, model and response behavior — all kept on this device.</p>
-                  </div>
-                  <div className="settings-grid">
-                    <section className="settings-card" data-testid="card-runtime-status">
-                      <h2 className="card-title"><span className="card-icon"><Activity size={15} /></span>Runtime connection</h2>
-                      <p className="card-desc">Finch talks to the Ollama service running on this PC.</p>
-                      <div className="connection-row"><span className="connection-label">Status</span><span className="connection-value" data-testid="text-connection-status"><span className={`status-dot ${connected ? 'online' : ''}`} />{runtime.loading ? 'Checking…' : connected ? 'Connected' : 'Not connected'}</span></div>
-                      <div className="connection-row"><span className="connection-label">Ollama version</span><span className="connection-value" data-testid="text-runtime-version">{runtime.version || (runtime.loading ? 'Checking…' : 'Unavailable')}</span></div>
-                      <div className="connection-row"><span className="connection-label">Installed models</span><span className="connection-value" data-testid="text-model-count">{runtime.loading ? 'Checking…' : `${runtime.models.length} ${runtime.models.length === 1 ? 'model' : 'models'}`}</span></div>
-                      {runtime.error && <div className="inline-error" data-testid="status-runtime-error">{runtime.error}</div>}
-                      <button className="refresh-button" onClick={() => void loadRuntime()} disabled={runtime.loading} style={{ marginTop: 12 }} data-testid="button-refresh-runtime"><RefreshCw size={13} className={runtime.loading ? 'spin' : ''} />{runtime.loading ? 'Checking connection' : 'Check connection'}</button>
-                    </section>
-                    <section className="settings-card">
-                      <h2 className="card-title"><span className="card-icon"><Database size={15} /></span>Available models</h2>
-                      <p className="card-desc">Choose a model that is installed in your local Ollama library.</p>
-                      {runtime.loading ? <div className="loading-shimmer" data-testid="loading-models" /> : runtime.models.length ? (
-                        <>
-                          <select className="model-select" value={preferences.model} onChange={(event) => updatePreference('model', event.target.value)} aria-label="Select active model" data-testid="select-settings-model">
-                            {runtime.models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
-                          </select>
-                          {runtime.models.filter((model) => model.name === preferences.model || model.model === preferences.model).map((model) => <div className="model-info" key={model.name}>{formatBytes(model.size)} · updated {formatTime(model.modified_at)}</div>)}
-                        </>
-                      ) : <div className="no-models" data-testid="empty-model-list">{connected ? 'No models found. Install one using the Windows instructions below.' : 'Model inventory is unavailable until Finch can connect to Ollama.'}</div>}
-                    </section>
-                    <section className="settings-card wide">
-                      <h2 className="card-title"><span className="card-icon"><SlidersHorizontal size={15} /></span>Generation preferences</h2>
-                      <p className="card-desc">These values are sent with each local chat request and stored only in this browser.</p>
-                      <div className="settings-grid" style={{ gap: '0 24px' }}>
-                        <div className="setting-control">
-                          <div className="setting-control-head"><label htmlFor="temperature">Temperature</label><output data-testid="value-temperature">{preferences.temperature.toFixed(1)}</output></div>
-                          <input id="temperature" type="range" min="0" max="2" step="0.1" value={preferences.temperature} onChange={(event) => updatePreference('temperature', Number(event.target.value))} data-testid="input-temperature" />
-                          <div className="control-help">Lower is more focused; higher is more exploratory.</div>
-                        </div>
-                        <div className="setting-control">
-                          <div className="setting-control-head"><label htmlFor="max-tokens">Maximum response length</label><output data-testid="value-max-tokens">{preferences.num_predict.toLocaleString()}</output></div>
-                          <input id="max-tokens" type="range" min="128" max="4096" step="128" value={preferences.num_predict} onChange={(event) => updatePreference('num_predict', Number(event.target.value))} data-testid="input-max-tokens" />
-                          <div className="control-help">Upper limit for generated tokens per response.</div>
-                        </div>
+                  </section>
+
+                  <section className="settings-card wide">
+                    <h2 className="card-title"><span className="card-icon"><SlidersHorizontal size={15} /></span>Generation preferences</h2>
+                    <p className="card-desc">These values are sent with each local chat request and stored only in this browser.</p>
+                    <div className="settings-grid" style={{ gap: '0 24px' }}>
+                      <div className="setting-control">
+                        <div className="setting-control-head"><label htmlFor="temperature">Temperature</label><output data-testid="value-temperature">{preferences.temperature.toFixed(1)}</output></div>
+                        <input id="temperature" type="range" min="0" max="2" step="0.1" value={preferences.temperature} onChange={(event) => updatePreference('temperature', Number(event.target.value))} data-testid="input-temperature" />
+                        <div className="control-help">Lower is more focused; higher is more exploratory.</div>
                       </div>
-                    </section>
-                    <section className="settings-card wide">
-                      <h2 className="card-title"><span className="card-icon"><CircleHelp size={15} /></span>Get Ollama running on Windows</h2>
-                      <p className="card-desc">A short path from a fresh install to your first private conversation.</p>
-                      <ol className="setup-steps" data-testid="list-windows-setup">
-                        <li><span><strong>Install Ollama for Windows.</strong> Download the installer from <span className="code-chip">ollama.com/download/windows</span> and run it. Ollama will run in the background after setup.</span></li>
-                        <li><span><strong>Open PowerShell</strong> from the Start menu and download a model, for example <span className="code-chip">ollama pull llama3.2</span>. The model is stored on your PC.</span></li>
-                        <li><span><strong>Wait for the download to finish</strong>, then choose Check connection above. Your installed model will appear in Available models.</span></li>
-                        <li><span><strong>Keep Ollama running.</strong> Finch sends prompts to your local Ollama service; it does not send chat content to a hosted AI provider.</span></li>
-                      </ol>
-                      {!connected && !runtime.loading && <div className="inline-error" role="status" data-testid="status-setup-needed">Connection isn’t available yet. Check that the Ollama app is running, then try again.</div>}
-                    </section>
-                    <section className="settings-card wide" style={{ background: '#e9efe7', borderColor: '#d7e2d5' }}>
-                      <h2 className="card-title"><span className="card-icon"><ShieldCheck size={15} /></span>Local by design</h2>
-                      <p className="card-desc" style={{ marginBottom: 0 }}>Conversation history and preferences stay in this browser’s local storage. Prompts are sent only to the Ollama endpoint configured for this workspace. Finch does not relay them to a cloud model provider.</p>
-                    </section>
-                  </div>
-                </section>
-              </Route>
-              <Route>
-                <section className="empty-conversation"><WifiOff size={25} /><h2>That page isn’t here</h2><p>Head back to your local workspace to pick up where you left off.</p><Link href="/" className="refresh-button" data-testid="link-return-chat">Return to chat</Link></section>
-              </Route>
-            </Switch>
-          </div>
-        </main>
-      </div>
+                      <div className="setting-control">
+                        <div className="setting-control-head"><label htmlFor="max-tokens">Maximum response length</label><output data-testid="value-max-tokens">{preferences.num_predict.toLocaleString()}</output></div>
+                        <input id="max-tokens" type="range" min="128" max="4096" step="128" value={preferences.num_predict} onChange={(event) => updatePreference('num_predict', Number(event.target.value))} data-testid="input-max-tokens" />
+                        <div className="control-help">Upper limit for generated tokens per response.</div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="settings-card wide" style={{ background: '#e9efe7', borderColor: '#d7e2d5' }}>
+                    <h2 className="card-title"><span className="card-icon"><ShieldCheck size={15} /></span>Local by design</h2>
+                    <p className="card-desc" style={{ marginBottom: 0 }}>
+                      Conversation history and preferences stay in this browser’s local storage. AI Girl personas are saved to your local database (`data/ai_girls.json` or PostgreSQL `@workspace/db`) and optionally synced to Supabase when configured.
+                    </p>
+                  </section>
+                </div>
+              </section>
+            </Route>
+
+            <Route>
+              <section className="empty-conversation">
+                <WifiOff size={25} />
+                <h2>That page isn’t here</h2>
+                <p>Head back to your local workspace to pick up where you left off.</p>
+                <Link href="/" className="refresh-button" data-testid="link-return-chat">Return to chat</Link>
+              </section>
+            </Route>
+          </Switch>
+        </div>
+      </main>
+    </div>
   );
 }
 

@@ -5,13 +5,7 @@ import { defineConfig } from 'vite';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
-const rawPort = process.env.PORT;
-
-if (!rawPort) {
-  throw new Error(
-    'PORT environment variable is required but was not provided.',
-  );
-}
+const rawPort = process.env.PORT ?? '5173';
 
 const port = Number(rawPort);
 
@@ -19,16 +13,14 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    'BASE_PATH environment variable is required but was not provided.',
-  );
-}
+const basePath = process.env.BASE_PATH ?? '/';
 
 const ollamaBaseUrl =
   process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434';
+const apiServerUrl =
+  process.env.API_SERVER_URL ?? 'http://127.0.0.1:5000';
+const comfyBaseUrl =
+  process.env.COMFYUI_URL ?? 'http://127.0.0.1:8188';
 
 try {
   new URL(ollamaBaseUrl);
@@ -86,6 +78,15 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (requestPath) => requestPath.replace(/^\/ollama/, ''),
       },
+      '/api': {
+        target: apiServerUrl,
+        changeOrigin: true,
+      },
+      '/comfyui': {
+        target: comfyBaseUrl,
+        changeOrigin: true,
+        rewrite: (requestPath) => requestPath.replace(/^\/comfyui/, ''),
+      },
     },
     fs: {
       strict: true,
@@ -97,3 +98,4 @@ export default defineConfig({
     allowedHosts: true,
   },
 });
+

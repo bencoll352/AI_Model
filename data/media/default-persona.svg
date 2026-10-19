@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 768" width="768" height="768">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="hsl(273, 55%, 10%)" />
+      <stop offset="50%" stop-color="hsl(333, 65%, 16%)" />
+      <stop offset="100%" stop-color="hsl(103, 60%, 8%)" />
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="42%" r="48%">
+      <stop offset="0%" stop-color="hsl(333, 90%, 60%)" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="hsl(273, 80%, 20%)" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="hsl(333, 95%, 65%)" />
+      <stop offset="100%" stop-color="hsl(103, 95%, 65%)" />
+    </linearGradient>
+  </defs>
+  <rect width="768" height="768" fill="url(#bg)" />
+  <circle cx="384" cy="320" r="320" fill="url(#glow)" />
+  <!-- Futuristic Cityscape Grid -->
+  <g stroke="hsl(103, 80%, 55%)" stroke-opacity="0.22" stroke-width="1.5">
+    <rect x="60" y="340" width="70" height="320" fill="hsl(273, 40%, 8%)" fill-opacity="0.7" />
+    <rect x="145" y="270" width="85" height="390" fill="hsl(273, 40%, 9%)" fill-opacity="0.7" />
+    <rect x="540" y="250" width="90" height="410" fill="hsl(273, 40%, 9%)" fill-opacity="0.7" />
+    <rect x="645" y="320" width="65" height="340" fill="hsl(273, 40%, 8%)" fill-opacity="0.7" />
+    <line x1="0" y1="660" x2="768" y2="660" stroke-width="2" stroke-opacity="0.5" />
+  </g>
+  <!-- Stylized Character Silhouette & Portrait -->
+  <g transform="translate(384, 340)">
+    <!-- Wavy Flowing Hair -->
+    <path d="M-110,-90 C-165,-10 -150,140 -125,240 C-85,200 -80,80 -65,20 Z" fill="hsl(333, 55%, 24%)" stroke="url(#neon)" stroke-width="2" />
+    <path d="M110,-90 C165,-10 150,140 125,240 C85,200 80,80 65,20 Z" fill="hsl(333, 55%, 24%)" stroke="url(#neon)" stroke-width="2" />
+    <circle cx="0" cy="-75" r="88" fill="hsl(333, 50%, 22%)" stroke="url(#neon)" stroke-width="2.5" />
+    <!-- Shoulders & Futuristic Outfit -->
+    <path d="M-145,320 C-135,155 -65,95 0,95 C65,95 135,155 145,320 Z" fill="hsl(273, 45%, 14%)" stroke="url(#neon)" stroke-width="3" />
+    <path d="M-55,110 L0,195 L55,110" fill="none" stroke="hsl(103, 95%, 68%)" stroke-width="3.5" />
+    <!-- Head & Face -->
+    <ellipse cx="0" cy="-60" rx="58" ry="70" fill="hsl(28, 55%, 78%)" />
+    <!-- Hair Bangs -->
+    <path d="M-60,-85 Q-20,-135 0,-95 Q25,-135 60,-85 Q45,-145 0,-145 Q-45,-145 -60,-85 Z" fill="hsl(333, 65%, 28%)" />
+    <!-- Cybernetic Eyes -->
+    <ellipse cx="-22" cy="-62" rx="9" ry="5" fill="hsl(103, 95%, 55%)" />
+    <ellipse cx="22" cy="-62" rx="9" ry="5" fill="hsl(103, 95%, 55%)" />
+    <circle cx="-20" cy="-63" r="2" fill="#ffffff" />
+    <circle cx="24" cy="-63" r="2" fill="#ffffff" />
+    <!-- Lips -->
+    <path d="M-14,-24 Q0,-15 14,-24 Q0,-20 -14,-24 Z" fill="hsl(345, 75%, 56%)" stroke="hsl(345, 75%, 52%)" stroke-width="2" />
+  </g>
+  <!-- HUD Frame -->
+  <rect x="28" y="28" width="712" height="712" rx="18" fill="none" stroke="url(#neon)" stroke-width="2" stroke-opacity="0.55" />
+  <rect x="44" y="625" width="680" height="88" rx="12" fill="#090d16" fill-opacity="0.82" stroke="hsl(333, 80%, 55%)" stroke-opacity="0.4" />
+  <text x="68" y="658" fill="#f8fafc" font-family="monospace" font-size="20" font-weight="bold">AI Girl · LOCALLY UNCENSORED STUDIO</text>
+  <text x="68" y="688" fill="#94a3b8" font-family="monospace" font-size="13">Create an image of a sexy AI girl with long, wavy hair, wearing a revealing outfit, standi</text>
+</svg>
