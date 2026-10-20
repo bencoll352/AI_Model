@@ -197,6 +197,7 @@ export const LOCAL_ENGINES_CONFIG = [
   { id: "aphrodite", name: "Aphrodite Engine", port: 2242, path: "/v1/models", type: "text" as const },
   { id: "sglang", name: "SGLang", port: 30000, path: "/v1/models", type: "text" as const },
   { id: "gpt4all", name: "GPT4All API", port: 4891, path: "/v1/models", type: "text" as const },
+  { id: "g4f", name: "GPT4Free (G4F)", port: 1337, path: "/v1/models", type: "text" as const },
   { id: "comfyui", name: "ComfyUI", port: 8188, path: "/system_stats", type: "image" as const },
 ];
 
@@ -252,6 +253,31 @@ export async function scanLocalEngines(force = false): Promise<DiscoveredEngine[
   lastEngineScan = { timestamp: now, engines };
   return engines;
 }
+
+// ============================================================================
+// GPT4Free (G4F) Frontier Engine Manager & Models
+// ============================================================================
+
+let g4fProcess: ChildProcess | null = null;
+let g4fLogs: string[] = [];
+
+export async function isG4fRunning(): Promise<boolean> {
+  try {
+    const res = await fetch("http://127.0.0.1:1337/v1/models", { signal: AbortSignal.timeout(1200) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export const G4F_MODELS = [
+  { id: "deepseek-r1", name: "DeepSeek-R1 (671B Full Reasoning)", provider: "G4F Free Router", notes: "Chain-of-thought <think> reasoning with deep intellect." },
+  { id: "gpt-4o", name: "OpenAI GPT-4o", provider: "G4F Free Router", notes: "Flagship intelligence for deep instruction-following." },
+  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "G4F Free Router", notes: "Human-grade prose, emotional depth and nuanced persona dialogues." },
+  { id: "gemini-2.0-flash", name: "Google Gemini 2.0 Flash", provider: "G4F Free Router", notes: "Ultra-fast response latency and massive context window." },
+  { id: "qwen-2.5-coder-32b", name: "Qwen 2.5 Coder 32B", provider: "G4F Free Router", notes: "Top-tier coding, system scripting and structured logic." },
+];
+
 
 
 interface SupabaseConfig {
@@ -759,6 +785,100 @@ router.post("/lu/comfyui/stop", (_req, res) => {
   }
   res.json({ status: "stopped" });
 });
+
+// ============================================================================
+// GPT4Free (G4F) Server Controls & Proxy Endpoints
+// ============================================================================
+
+router.get("/lu/g4f/status", async (_req, res) => {
+  const running = await isG4fRunning();
+  res.json({
+    running,
+    port: 1337,
+    url: "http://127.0.0.1:1337/v1",
+    models: G4F_MODELS,
+    logs: g4fLogs.slice(-20),
+  });
+});
+
+router.post("/lu/g4f/start", async (_req, res) => {
+  if (await isG4fRunning()) {
+    res.json({ status: "already_running", port: 1337 });
+    return;
+  }
+  g4fLogs = [];
+  const scriptPath = path.resolve(process.cwd(), "scripts", "g4f_server.py");
+  g4fProcess = spawn("python", [scriptPath, "1337", "127.0.0.1"], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  g4fProcess.stdout?.on("data", (d) => {
+    g4fLogs.push(d.toString());
+    if (g4fLogs.length > 100) g4fLogs.shift();
+  });
+  g4fProcess.stderr?.on("data", (d) => {
+    g4fLogs.push(d.toString());
+    if (g4fLogs.length > 100) g4fLogs.shift();
+  });
+  g4fProcess.on("exit", () => {
+    g4fProcess = null;
+  });
+  res.json({ status: "started", port: 1337 });
+});
+
+router.post("/lu/g4f/stop", (_req, res) => {
+  if (g4fProcess && !g4fProcess.killed) {
+    try {
+      if (process.platform === "win32" && g4fProcess.pid) {
+        execSync(`taskkill /pid ${g4fProcess.pid} /T /F`, { stdio: "ignore" });
+      } else {
+        g4fProcess.kill("SIGTERM");
+      }
+    } catch {
+      /* ignore */
+    }
+    g4fProcess = null;
+  }
+  res.json({ status: "stopped" });
+});
+
+router.post("/lu/g4f/chat", async (req, res) => {
+  try {
+    const { model = "deepseek-r1", messages = [], stream = true, temperature = 0.7 } = req.body;
+    const g4fRes = await fetch("http://127.0.0.1:1337/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages, stream, temperature }),
+    });
+
+    if (!g4fRes.ok) {
+      const errText = await g4fRes.text();
+      res.status(g4fRes.status).json({ error: `G4F error: ${errText || g4fRes.statusText}` });
+      return;
+    }
+
+    if (stream && g4fRes.body) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      const reader = g4fRes.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+      res.end();
+    } else {
+      const json = await g4fRes.json();
+      res.json(json);
+    }
+  } catch (err: any) {
+    logger.error({ err }, "Error communicating with G4F server");
+    res.status(502).json({ error: "Failed to connect to G4F server on port 1337. Make sure it is started in Settings." });
+  }
+});
+
 
 // Configure Supabase credentials at runtime
 router.post("/lu/supabase-config", (req, res) => {

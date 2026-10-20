@@ -10,8 +10,23 @@ import {
 type Message = { id: string; role: 'user' | 'assistant'; content: string; createdAt: string };
 type Conversation = { id: string; title: string; createdAt: string; updatedAt: string; messages: Message[]; personaId?: number };
 type Model = { name: string; model: string; size: number; modified_at: string };
-type Preferences = { temperature: number; num_predict: number; model: string; activeVoice: string; activePersonaId: number | null };
+type Preferences = {
+  temperature: number;
+  num_predict: number;
+  model: string;
+  activeVoice: string;
+  activePersonaId: number | null;
+  inferenceBackend: 'ollama' | 'g4f';
+};
 type Runtime = { version: string | null; models: Model[]; loading: boolean; error: string | null };
+
+export const G4F_PRESET_MODELS = [
+  { id: 'deepseek-r1', name: 'DeepSeek-R1 (671B Full Reasoning)', notes: 'Chain-of-thought <think> reasoning tokens' },
+  { id: 'gpt-4o', name: 'OpenAI GPT-4o', notes: 'Top-tier frontier intelligence' },
+  { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', notes: 'Nuanced storytelling & emotional depth' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', notes: 'Ultra-fast response & massive context' },
+  { id: 'qwen-2.5-coder-32b', name: 'Qwen 2.5 Coder 32B', notes: 'Top-tier coding and structured logic' },
+];
 
 type AiGirlPersona = {
   id: number;
@@ -47,6 +62,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   model: '',
   activeVoice: 'Alba',
   activePersonaId: null,
+  inferenceBackend: 'ollama',
 };
 
 const DEFAULT_VOICES = [
@@ -141,6 +157,10 @@ function Workspace() {
   // Talking Avatar & LipSync state
   const [talkingAvatarMap, setTalkingAvatarMap] = useState<Record<number, string>>({});
   const [generatingLipSyncId, setGeneratingLipSyncId] = useState<number | null>(null);
+
+  // GPT4Free (G4F) Frontier Engine state
+  const [g4fStatus, setG4fStatus] = useState<{ running: boolean; port: number; models: Array<{ id: string; name: string; notes: string }> } | null>(null);
+  const [startingG4f, setStartingG4f] = useState(false);
 
 
   // Character.AI Importer state
@@ -279,7 +299,9 @@ function Workspace() {
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeId) || null;
   const activePersona = personas.find((p) => p.id === preferences.activePersonaId) || null;
-  const connected = Boolean(runtime.version);
+  const connected = preferences.inferenceBackend === 'g4f'
+    ? Boolean(g4fStatus?.running)
+    : Boolean(runtime.version);
 
   useEffect(() => {
     localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
@@ -291,9 +313,10 @@ function Workspace() {
 
   const loadLuStudio = useCallback(async () => {
     try {
-      const [statusRes, girlsRes] = await Promise.all([
+      const [statusRes, girlsRes, g4fRes] = await Promise.all([
         fetch('/api/lu/status'),
         fetch('/api/lu/ai-girls'),
+        fetch('/api/lu/g4f/status'),
       ]);
       if (statusRes.ok) {
         const statusData = (await statusRes.json()) as LuStatus;
@@ -303,6 +326,10 @@ function Workspace() {
         const girlsData = (await girlsRes.json()) as { items: AiGirlPersona[]; storage: string };
         setPersonas(girlsData.items || []);
         setStorageEngine(girlsData.storage || 'local_json');
+      }
+      if (g4fRes.ok) {
+        const g4fData = (await g4fRes.json()) as { running: boolean; port: number; models: Array<{ id: string; name: string; notes: string }> };
+        setG4fStatus(g4fData);
       }
     } catch {
       /* API server might be starting */
@@ -420,44 +447,94 @@ function Workspace() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const response = await fetch('/ollama/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: preferences.model,
-          messages: requestMessages,
-          stream: true,
-          options: { temperature: preferences.temperature, num_predict: preferences.num_predict },
-        }),
-      });
-      if (!response.ok) throw new Error(`Chat request failed (${response.status}). Check that Ollama is running and try again.`);
-      if (!response.body) throw new Error('The local runtime did not return a readable response.');
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let finished = false;
-      while (!finished) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const chunk = JSON.parse(line) as { message?: { content?: string }; done?: boolean; error?: string };
-          if (chunk.error) throw new Error(chunk.error);
-          if (chunk.message?.content) {
-            const addition = chunk.message.content;
-            updateConversation(conversationId, (item) => ({
-              ...item,
-              updatedAt: new Date().toISOString(),
-              messages: item.messages.map((message) => message.id === assistantMessage.id
-                ? { ...message, content: message.content + addition } : message),
-            }));
-          }
-          if (chunk.done) finished = true;
+      if (preferences.inferenceBackend === 'g4f') {
+        const response = await fetch('/api/lu/g4f/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: preferences.model || 'deepseek-r1',
+            messages: requestMessages,
+            stream: true,
+            temperature: preferences.temperature,
+          }),
+        });
+        if (!response.ok) {
+          const errData = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(errData.error || `G4F chat request failed (${response.status}). Check that G4F is running in Settings.`);
         }
-        if (done) finished = true;
+        if (!response.body) throw new Error('No stream returned from G4F runtime.');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed === 'data: [DONE]') continue;
+            if (trimmed.startsWith('data: ')) {
+              try {
+                const chunk = JSON.parse(trimmed.slice(6));
+                const addition = chunk.choices?.[0]?.delta?.content || '';
+                if (addition) {
+                  updateConversation(conversationId, (item) => ({
+                    ...item,
+                    updatedAt: new Date().toISOString(),
+                    messages: item.messages.map((message) =>
+                      message.id === assistantMessage.id ? { ...message, content: message.content + addition } : message
+                    ),
+                  }));
+                }
+              } catch {
+                /* ignore partial JSON fragments */
+              }
+            }
+          }
+        }
+      } else {
+        const response = await fetch('/ollama/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: preferences.model,
+            messages: requestMessages,
+            stream: true,
+            options: { temperature: preferences.temperature, num_predict: preferences.num_predict },
+          }),
+        });
+        if (!response.ok) throw new Error(`Chat request failed (${response.status}). Check that Ollama is running and try again.`);
+        if (!response.body) throw new Error('The local runtime did not return a readable response.');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finished = false;
+        while (!finished) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const chunk = JSON.parse(line) as { message?: { content?: string }; done?: boolean; error?: string };
+            if (chunk.error) throw new Error(chunk.error);
+            if (chunk.message?.content) {
+              const addition = chunk.message.content;
+              updateConversation(conversationId, (item) => ({
+                ...item,
+                updatedAt: new Date().toISOString(),
+                messages: item.messages.map((message) => message.id === assistantMessage.id
+                  ? { ...message, content: message.content + addition } : message),
+              }));
+            }
+            if (chunk.done) finished = true;
+          }
+          if (done) finished = true;
+        }
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
@@ -616,6 +693,28 @@ function Workspace() {
     setStudioStatusMsg(data.error || `ComfyUI: ${data.status}`);
     await loadLuStudio();
   };
+
+  const handleStartG4f = async () => {
+    setStartingG4f(true);
+    setStudioStatusMsg('Launching GPT4Free (G4F) OpenAI-compatible server on port 1337...');
+    try {
+      await fetch('/api/lu/g4f/start', { method: 'POST' });
+      await new Promise((r) => setTimeout(r, 1200));
+      await loadLuStudio();
+      setStudioStatusMsg('GPT4Free server online! DeepSeek-R1, GPT-4o, and Claude 3.5 are ready.');
+    } catch {
+      setStudioStatusMsg('Failed to start G4F server.');
+    } finally {
+      setStartingG4f(false);
+    }
+  };
+
+  const handleStopG4f = async () => {
+    await fetch('/api/lu/g4f/stop', { method: 'POST' });
+    setStudioStatusMsg('Stopped G4F background server.');
+    await loadLuStudio();
+  };
+
 
   const submit = (event: FormEvent) => { event.preventDefault(); void sendMessage(); };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -816,7 +915,9 @@ function Workspace() {
                         </div>
                         {!runtime.loading && !connected && (
                           <div className="inline-error" role="status" data-testid="status-chat-disconnected">
-                            Ollama isn’t running right now, but you can still use <strong>Create & AI Girls</strong> and <strong>Voice (Beta)</strong> in the sidebar!
+                            {preferences.inferenceBackend === 'g4f'
+                              ? 'GPT4Free server isn’t running right now. Click "Launch G4F Server" in Settings to connect!'
+                              : 'Ollama isn’t running right now. Switch to G4F (Frontier) in the composer or start Ollama!'}
                           </div>
                         )}
                       </div>
@@ -831,15 +932,64 @@ function Workspace() {
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
                       onKeyDown={handleKeyDown}
-                      placeholder={connected ? `Message ${activePersona ? activePersona.name : 'your local model'}…` : 'Start Ollama to chat, or switch to Create & AI Girls in the sidebar'}
-                      aria-label="Message your local model"
+                      placeholder={
+                        connected
+                          ? `Message ${activePersona ? activePersona.name : preferences.inferenceBackend === 'g4f' ? 'DeepSeek-R1 / Frontier Model' : 'your local model'}…`
+                          : preferences.inferenceBackend === 'g4f'
+                            ? 'Start G4F server in Settings to chat with DeepSeek-R1 & GPT-4o'
+                            : 'Start Ollama to chat, or switch to G4F (Frontier) below'
+                      }
+                      aria-label="Message your model"
                       data-testid="input-chat-message"
                       disabled={!connected || !preferences.model || streaming}
                     />
                     <div className="composer-controls">
-                      <div className="composer-model">
+                      <div className="composer-model" style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                         <LockKeyhole size={12} />
-                        <span>{preferences.model || 'No model selected'} {activePersona ? `· Persona: ${activePersona.name}` : ''}</span>
+                        <select
+                          value={preferences.inferenceBackend}
+                          onChange={(e) => {
+                            const b = e.target.value as 'ollama' | 'g4f';
+                            updatePreference('inferenceBackend', b);
+                            if (b === 'g4f') {
+                              updatePreference('model', 'deepseek-r1');
+                            } else if (runtime.models[0]) {
+                              updatePreference('model', runtime.models[0].name);
+                            }
+                          }}
+                          style={{
+                            fontSize: 10,
+                            padding: '2px 6px',
+                            borderRadius: 5,
+                            border: '1px solid #d0d7d0',
+                            background: preferences.inferenceBackend === 'g4f' ? '#e2f0e6' : '#f4f1e9',
+                            fontWeight: 700,
+                            color: preferences.inferenceBackend === 'g4f' ? '#215c3b' : '#33444a',
+                          }}
+                          title="Switch between Local Offline (Ollama) and Frontier Cloud Intelligence (GPT4Free)"
+                        >
+                          <option value="ollama">Ollama (Offline)</option>
+                          <option value="g4f">G4F (Frontier)</option>
+                        </select>
+
+                        <select
+                          value={preferences.model}
+                          onChange={(e) => updatePreference('model', e.target.value)}
+                          style={{ fontSize: 10, padding: '2px 6px', borderRadius: 5, border: '1px solid #d0d7d0', background: '#fff', color: '#2b3e46', maxWidth: 180 }}
+                        >
+                          {preferences.inferenceBackend === 'g4f' ? (
+                            G4F_PRESET_MODELS.map((m) => (
+                              <option key={m.id} value={m.id}>{m.name}</option>
+                            ))
+                          ) : runtime.models.length > 0 ? (
+                            runtime.models.map((m) => (
+                              <option key={m.name} value={m.name}>{m.name}</option>
+                            ))
+                          ) : (
+                            <option value="">No local models</option>
+                          )}
+                        </select>
+                        {activePersona && <span style={{ color: '#4a6b57', fontWeight: 600 }}>· {activePersona.name}</span>}
                       </div>
                       {streaming ? (
                         <button type="button" className="send-button stop" onClick={stopGeneration} aria-label="Stop generation" title="Stop generation" data-testid="button-stop-generation">
@@ -852,7 +1002,11 @@ function Workspace() {
                       )}
                     </div>
                   </form>
-                  <div className="composer-foot">LOCAL MODEL · NO CLOUD ROUTING · SHIFT + ENTER FOR A NEW LINE</div>
+                  <div className="composer-foot">
+                    {preferences.inferenceBackend === 'g4f'
+                      ? 'GPT4FREE FRONTIER ENGINE (DEEPSEEK-R1 / GPT-4O) · DEEP REASONING · SHIFT + ENTER FOR A NEW LINE'
+                      : 'LOCAL MODEL · NO CLOUD ROUTING · SHIFT + ENTER FOR A NEW LINE'}
+                  </div>
                 </div>
               </section>
             </Route>
@@ -1467,6 +1621,61 @@ function Workspace() {
                     <button className="refresh-button" onClick={() => { void loadRuntime(); void loadLuStudio(); }} disabled={runtime.loading} style={{ marginTop: 12 }} data-testid="button-refresh-runtime">
                       <RefreshCw size={13} className={runtime.loading ? 'spin' : ''} />Check connections
                     </button>
+                  </section>
+
+                  <section className="settings-card">
+                    <h2 className="card-title"><span className="card-icon"><Sparkles size={15} /></span>GPT4Free (G4F) Frontier Engine</h2>
+                    <p className="card-desc">Access 600B+ frontier models (DeepSeek-R1 reasoning, GPT-4o, Claude 3.5 Sonnet) via local G4F API (:1337).</p>
+                    <div className="connection-row">
+                      <span className="connection-label">G4F Server Status</span>
+                      <span className="connection-value">
+                        <span className={`status-dot ${g4fStatus?.running ? 'online' : ''}`} />
+                        {g4fStatus?.running ? 'Running (:1337)' : 'Stopped (Offline)'}
+                      </span>
+                    </div>
+                    <div className="connection-row">
+                      <span className="connection-label">Active Inference Engine</span>
+                      <span className="connection-value" style={{ fontWeight: 700, color: preferences.inferenceBackend === 'g4f' ? '#215c3b' : '#33444a' }}>
+                        {preferences.inferenceBackend === 'g4f' ? 'Frontier (G4F)' : 'Local (Ollama)'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                      {g4fStatus?.running ? (
+                        <button
+                          type="button"
+                          className="refresh-button"
+                          onClick={handleStopG4f}
+                          style={{ color: '#a34839', borderColor: '#e4c4bd' }}
+                        >
+                          <Square size={13} /> Stop G4F Server
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="refresh-button"
+                          onClick={handleStartG4f}
+                          disabled={startingG4f}
+                          style={{ color: '#27523c', borderColor: '#b8d8be', background: '#eaf4ee' }}
+                        >
+                          <Play size={13} /> {startingG4f ? 'Starting G4F…' : 'Launch G4F Server'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="refresh-button"
+                        onClick={() => {
+                          const next = preferences.inferenceBackend === 'g4f' ? 'ollama' : 'g4f';
+                          updatePreference('inferenceBackend', next);
+                          if (next === 'g4f') {
+                            updatePreference('model', 'deepseek-r1');
+                          } else if (runtime.models[0]) {
+                            updatePreference('model', runtime.models[0].name);
+                          }
+                        }}
+                      >
+                        Switch to {preferences.inferenceBackend === 'g4f' ? 'Ollama' : 'G4F'}
+                      </button>
+                    </div>
                   </section>
 
                   <section className="settings-card">
