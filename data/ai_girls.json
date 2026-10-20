@@ -1,5 +1,17 @@
 [
   {
+    "id": 3,
+    "name": "AI Girl",
+    "description": "A sexy and intelligent AI girl with a mysterious past.",
+    "image_url": "/api/lu/media/banana-d57a0b89-24ec-40cc-bbba-7806151b9503.webp",
+    "voice_url": "/api/lu/media/voice-8ef777ca-1705-447e-845d-ae12f8d7e051.mp3",
+    "prompt": "Create an image of a sexy AI girl with long, wavy hair, wearing a revealing outfit, standing in a futuristic cityscape.",
+    "voice_text": "Hello, I am AI Girl. I'm here to make your dreams come true.",
+    "voice_id": "Alba",
+    "model": "hermes3:8b",
+    "created_at": "2026-10-20T18:25:58.360Z"
+  },
+  {
     "id": 2,
     "name": "AI Girl",
     "description": "A sexy and intelligent AI girl with a mysterious past.",

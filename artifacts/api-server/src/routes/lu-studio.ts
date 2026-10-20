@@ -1293,9 +1293,19 @@ router.post("/lu/voice/sensevoice", async (req, res) => {
       try {
         const cmd = `python "${senseVoiceScript}" "${targetAudioPath}"`;
         const out = execSync(cmd, { timeout: 25000, encoding: "utf-8" });
-        const parsed = JSON.parse(out.trim().split("\n").pop() || "{}");
-        if (parsed && !parsed.error) {
-          result = { ...result, ...parsed };
+        const line = out.split("\n").find((l) => l.includes("__SENSEVOICE_OUTPUT__:"));
+        if (line) {
+          const jsonStr = line.split("__SENSEVOICE_OUTPUT__:")[1]?.trim();
+          const parsed = JSON.parse(jsonStr || "{}");
+          if (parsed && !parsed.error) {
+            result = { ...result, ...parsed };
+          }
+        } else {
+          const lastLine = out.trim().split("\n").pop() || "{}";
+          const parsed = JSON.parse(lastLine);
+          if (parsed && !parsed.error) {
+            result = { ...result, ...parsed };
+          }
         }
       } catch (scriptErr) {
         logger.warn({ scriptErr }, "SenseVoice execution fallback used");

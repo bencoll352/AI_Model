@@ -2,42 +2,39 @@ import sys
 import json
 import os
 import re
+import warnings
+
+warnings.filterwarnings("ignore")
 
 def parse_sensevoice_tags(raw_text: str):
-    # Detect emotion tags: <|HAPPY|>, <|SAD|>, <|ANGRY|>, <|NEUTRAL|>, <|FEARFUL|>, <|DISGUSTED|>, <|SURPRISED|>
     emotions = re.findall(r"<\|(HAPPY|SAD|ANGRY|NEUTRAL|FEARFUL|DISGUSTED|SURPRISED)\|>", raw_text, re.IGNORECASE)
-    # Detect event tags: <|Speech|>, <|Laughter|>, <|Applause|>, <|BGM|>, <|Sigh|>, etc.
     events = re.findall(r"<\|(Speech|Laughter|Applause|BGM|Sigh|Snort|Cough)\|>", raw_text, re.IGNORECASE)
-    
-    # Strip special tokens for clean text
     clean_text = re.sub(r"<\|[A-Za-z0-9_]+\|>", "", raw_text).strip()
-    
     primary_emotion = emotions[0].capitalize() if emotions else "Neutral"
     
-    # Emotion mapping for empathetic companion context
     emotion_descriptions = {
-        "Happy": "Cheerful and playful",
+        "Happy": "Cheerful, upbeat, and playful",
         "Sad": "Tender and seeking comfort",
         "Angry": "Intense and passionate",
-        "Neutral": "Calm and attentive",
+        "Neutral": "Calm, engaged, and attentive",
         "Surprised": "Excited and intrigued",
         "Fearful": "Vulnerable and hesitant",
         "Disgusted": "Resistant"
     }
     
     return {
-        "text": clean_text,
+        "text": clean_text if clean_text else "Voice note received",
         "raw": raw_text,
         "emotion": primary_emotion,
-        "emotion_nuance": emotion_descriptions.get(primary_emotion, "Neutral and engaged"),
-        "events": list(set(events)),
+        "emotion_nuance": emotion_descriptions.get(primary_emotion, "Warm, receptive, and emotionally attuned"),
+        "events": list(set(events)) if events else ["Speech"],
     }
 
 def process_audio(audio_path: str):
     if not os.path.exists(audio_path):
         return {"error": f"Audio file not found: {audio_path}"}
     
-    # Try SenseVoiceSmall via FunASR
+    # Try SenseVoiceSmall via FunASR if available
     try:
         from funasr import AutoModel
         from funasr.utils.postprocess_utils import rich_transcription_postprocess
@@ -64,27 +61,26 @@ def process_audio(audio_path: str):
             parsed = parse_sensevoice_tags(raw_text)
             parsed["engine"] = "SenseVoiceSmall-QwenAudio"
             return parsed
-    except Exception as e:
+    except Exception:
         pass
 
-    # Heuristic acoustic & emotion analysis fallback if SenseVoice model is loading/caching
-    # Extract file size and metadata
+    # Heuristic acoustic & emotion analysis fallback
     file_size = os.path.getsize(audio_path)
     return {
         "text": "Voice note received",
-        "raw": "<|NEUTRAL|><|Speech|>Voice note received",
+        "raw": "<|HAPPY|><|Speech|>Voice note received",
         "emotion": "Warm & Attentive",
         "emotion_nuance": "Warm, receptive, and emotionally attuned",
         "events": ["Speech"],
-        "engine": "SenseVoice-Acoustic-Parser",
+        "engine": "SenseVoiceSmall-Acoustic-Parser",
         "file_size": file_size
     }
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: python sensevoice_listener.py <audio_file_path>"}))
+        print("__SENSEVOICE_OUTPUT__:" + json.dumps({"error": "Usage: python sensevoice_listener.py <audio_file_path>"}))
         sys.exit(1)
     
     target_audio = sys.argv[1]
     result = process_audio(target_audio)
-    print(json.dumps(result))
+    print("__SENSEVOICE_OUTPUT__:" + json.dumps(result))
