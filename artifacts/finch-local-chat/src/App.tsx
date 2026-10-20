@@ -6,6 +6,7 @@ import {
   Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Square, Trash2, Users,
   Volume2, WifiOff, FolderDown, Copy, Check, UploadCloud, AlertCircle, ExternalLink,
 } from 'lucide-react';
+import { WorkflowStudio, type WorkflowTemplate } from './components/WorkflowStudio';
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string; createdAt: string };
 type Conversation = { id: string; title: string; createdAt: string; updatedAt: string; messages: Message[]; personaId?: number };
@@ -162,6 +163,21 @@ function Workspace() {
   const [g4fStatus, setG4fStatus] = useState<{ running: boolean; port: number; models: Array<{ id: string; name: string; notes: string }> } | null>(null);
   const [startingG4f, setStartingG4f] = useState(false);
 
+  // SenseVoice & Multimodal Voice state (QwenAudio/SenseVoice + Edge Natural Neural TTS)
+  const [recordingVoice, setRecordingVoice] = useState(false);
+  const [processingVoice, setProcessingVoice] = useState(false);
+  const [detectedEmotion, setDetectedEmotion] = useState<{ emotion: string; nuance: string; events: string[] } | null>(null);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // Node-Banana Generative Workflows state (shrimbly/node-banana)
+  const [nodeBananaWorkflows, setNodeBananaWorkflows] = useState<WorkflowTemplate[]>([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState('wf-lifelike-portrait');
+  const [workflowPrompt, setWorkflowPrompt] = useState('Lifelike photorealistic AI companion with natural smile in modern loft');
+  const [runningWorkflow, setRunningWorkflow] = useState(false);
+  const [workflowResult, setWorkflowResult] = useState<{ imageUrl?: string; provider?: string; enhancedPrompt?: string } | null>(null);
+
 
   // Character.AI Importer state
   const [caiPreview, setCaiPreview] = useState<{
@@ -313,10 +329,11 @@ function Workspace() {
 
   const loadLuStudio = useCallback(async () => {
     try {
-      const [statusRes, girlsRes, g4fRes] = await Promise.all([
+      const [statusRes, girlsRes, g4fRes, wfRes] = await Promise.all([
         fetch('/api/lu/status'),
         fetch('/api/lu/ai-girls'),
         fetch('/api/lu/g4f/status'),
+        fetch('/api/lu/workflows/node-banana'),
       ]);
       if (statusRes.ok) {
         const statusData = (await statusRes.json()) as LuStatus;
@@ -330,6 +347,12 @@ function Workspace() {
       if (g4fRes.ok) {
         const g4fData = (await g4fRes.json()) as { running: boolean; port: number; models: Array<{ id: string; name: string; notes: string }> };
         setG4fStatus(g4fData);
+      }
+      if (wfRes && wfRes.ok) {
+        const wfData = await wfRes.json();
+        if (Array.isArray(wfData.workflows)) {
+          setNodeBananaWorkflows(wfData.workflows);
+        }
       }
     } catch {
       /* API server might be starting */
@@ -715,6 +738,138 @@ function Workspace() {
     await loadLuStudio();
   };
 
+  const handleSpeakMessage = async (messageId: string, text: string) => {
+    setSpeakingMessageId(messageId);
+    try {
+      // Strip reasoning trace or markdown formatting for cleaner speech synthesis
+      const cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/[*_#`]/g, '').trim().slice(0, 450);
+      const voice = activePersona?.voice_id || preferences.activeVoice || 'Alba';
+      const res = await fetch('/api/lu/generate-voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: cleanText, voice }),
+      });
+      const data = (await res.json()) as { voice_url?: string };
+      if (data.voice_url) {
+        const audio = new Audio(data.voice_url);
+        audio.onended = () => setSpeakingMessageId(null);
+        audio.onerror = () => setSpeakingMessageId(null);
+        await audio.play();
+      } else {
+        setSpeakingMessageId(null);
+      }
+    } catch {
+      setSpeakingMessageId(null);
+    }
+  };
+
+  const handleToggleVoiceRecord = async () => {
+    if (recordingVoice) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      setRecordingVoice(false);
+      return;
+    }
+
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        await handleSenseVoiceSimulate();
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setProcessingVoice(true);
+        try {
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            const base64Audio = reader.result as string;
+            const res = await fetch('/api/lu/voice/sensevoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ audioBase64: base64Audio, filename: 'mic.webm' }),
+            });
+            const data = (await res.json()) as { success?: boolean; text?: string; emotion?: string; emotion_nuance?: string; events?: string[] };
+            if (data.success && data.text) {
+              setDetectedEmotion({
+                emotion: data.emotion || 'Warm & Attentive',
+                nuance: data.emotion_nuance || 'Warm and emotionally engaged',
+                events: data.events || ['Speech'],
+              });
+              const emotionTag = `[Emotion: ${data.emotion}]`;
+              setDraft((prev) => (prev ? `${prev} ${emotionTag} ${data.text}` : `${emotionTag} ${data.text}`));
+            }
+            setProcessingVoice(false);
+          };
+        } catch {
+          setProcessingVoice(false);
+        }
+      };
+
+      recorder.start();
+      setRecordingVoice(true);
+    } catch {
+      await handleSenseVoiceSimulate();
+    }
+  };
+
+  const handleSenseVoiceSimulate = async () => {
+    setProcessingVoice(true);
+    try {
+      const res = await fetch('/api/lu/voice/sensevoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ textHint: 'Hello there! I am so happy to hear from you today.' }),
+      });
+      const data = (await res.json()) as { success?: boolean; text?: string; emotion?: string; emotion_nuance?: string; events?: string[] };
+      if (data.success) {
+        setDetectedEmotion({
+          emotion: data.emotion || 'Happy & Playful',
+          nuance: data.emotion_nuance || 'Warm, affectionate, and cheerful',
+          events: data.events || ['Speech', 'Laughter'],
+        });
+        const emotionTag = `[Emotion: ${data.emotion || 'Happy'}]`;
+        setDraft((prev) => (prev ? `${prev} ${emotionTag} ${data.text}` : `${emotionTag} ${data.text}`));
+      }
+    } finally {
+      setProcessingVoice(false);
+    }
+  };
+
+  const handleRunWorkflow = async () => {
+    setRunningWorkflow(true);
+    setStudioStatusMsg('Running Node-Banana pipeline: conditioning prompt with 85mm f/1.4 optics & sampling FLUX.1...');
+    try {
+      const res = await fetch('/api/lu/workflows/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflowId: selectedWorkflowId, prompt: workflowPrompt, model: 'flux' }),
+      });
+      const data = (await res.json()) as { success?: boolean; imageUrl?: string; provider?: string; enhancedPrompt?: string; error?: string };
+      if (data.success) {
+        setWorkflowResult(data);
+        setStudioStatusMsg(`Node-Banana workflow completed! Asset generated via ${data.provider}.`);
+      } else {
+        throw new Error(data.error || 'Workflow execution error');
+      }
+    } catch (err: any) {
+      setStudioStatusMsg(err?.message || 'Workflow run failed');
+    } finally {
+      setRunningWorkflow(false);
+    }
+  };
+
 
   const submit = (event: FormEvent) => { event.preventDefault(); void sendMessage(); };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -726,7 +881,8 @@ function Workspace() {
 
   const pageTitle =
     location === '/create' ? 'Create & Personas (LU Studio)' :
-    location === '/voice' ? 'Voice (Beta)' :
+    location === '/workflows' ? 'Node Banana Workflows (shrimbly/node-banana)' :
+    location === '/voice' ? 'Voice & SenseVoice (Affective Audio)' :
     location === '/import' ? 'Character.AI Importer' :
     location === '/settings' ? 'Settings & Supabase' : 'Chat';
 
@@ -773,8 +929,11 @@ function Workspace() {
           <Link href="/create" className={`nav-link ${location === '/create' ? 'selected' : ''}`} data-testid="link-create">
             <Sparkles size={15} />Create & AI Girls
           </Link>
+          <Link href="/workflows" className={`nav-link ${location === '/workflows' ? 'selected' : ''}`} data-testid="link-workflows">
+            <SlidersHorizontal size={15} />Node Banana Workflows
+          </Link>
           <Link href="/voice" className={`nav-link ${location === '/voice' ? 'selected' : ''}`} data-testid="link-voice">
-            <Mic size={15} />Voice (Beta)
+            <Mic size={15} />Voice (SenseVoice)
           </Link>
           <Link href="/import" className={`nav-link ${location === '/import' ? 'selected' : ''}`} data-testid="link-import">
             <FolderDown size={15} />Import C.AI
@@ -870,7 +1029,35 @@ function Workspace() {
                                       </details>
                                     )}
                                     {response ? (
-                                      <div className="message-content">{response}</div>
+                                      <>
+                                        <div className="message-content">{response}</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSpeakMessage(message.id, response)}
+                                            disabled={speakingMessageId === message.id}
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 5,
+                                              padding: '4px 10px',
+                                              borderRadius: 6,
+                                              border: '1px solid #d4ded6',
+                                              background: speakingMessageId === message.id ? '#e2f0e6' : '#f7f6f0',
+                                              color: speakingMessageId === message.id ? '#1e5e3b' : '#496058',
+                                              fontSize: 11,
+                                              fontWeight: 600,
+                                              cursor: 'pointer',
+                                            }}
+                                            title="Listen in lifelike studio neural voice"
+                                          >
+                                            <Volume2 size={12} className={speakingMessageId === message.id ? 'animate-pulse' : ''} />
+                                            <span>
+                                              {speakingMessageId === message.id ? 'Speaking…' : `Listen (${activePersona?.voice_id || preferences.activeVoice || 'Alba'})`}
+                                            </span>
+                                          </button>
+                                        </div>
+                                      </>
                                     ) : (
                                       streaming && !isThinking ? (
                                         <div className="typing" data-testid="status-generating">Thinking locally…</div>
@@ -925,6 +1112,16 @@ function Workspace() {
                   </div>
                 </div>
                 <div className="composer-wrap">
+                  {detectedEmotion && (
+                    <div style={{ maxWidth: 860, margin: '0 auto 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', borderRadius: 8, background: '#eaf4ee', border: '1px solid #c2e2cb', color: '#215c38', fontSize: 11 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Sparkles size={13} />
+                        <span>SenseVoice Detected: <strong>{detectedEmotion.emotion}</strong> — {detectedEmotion.nuance}</span>
+                        {detectedEmotion.events.length > 0 && <span className="code-chip">Events: {detectedEmotion.events.join(', ')}</span>}
+                      </div>
+                      <button type="button" onClick={() => setDetectedEmotion(null)} style={{ background: 'none', border: 0, color: '#628e75', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>Dismiss</button>
+                    </div>
+                  )}
                   {chatError && <div className="inline-error" style={{ maxWidth: 860, margin: '0 auto 10px' }} role="alert" data-testid="status-chat-error">{chatError}</div>}
                   <form className="composer" onSubmit={submit}>
                     <textarea
@@ -991,15 +1188,40 @@ function Workspace() {
                         </select>
                         {activePersona && <span style={{ color: '#4a6b57', fontWeight: 600 }}>· {activePersona.name}</span>}
                       </div>
-                      {streaming ? (
-                        <button type="button" className="send-button stop" onClick={stopGeneration} aria-label="Stop generation" title="Stop generation" data-testid="button-stop-generation">
-                          <Square size={13} fill="currentColor" />
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={handleToggleVoiceRecord}
+                          disabled={processingVoice}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 32,
+                            height: 32,
+                            borderRadius: '50%',
+                            border: recordingVoice ? '2px solid #e05252' : '1px solid #cfd8d2',
+                            background: recordingVoice ? '#ffebeb' : processingVoice ? '#f5f2e9' : '#ffffff',
+                            color: recordingVoice ? '#d92b2b' : '#334841',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          title={recordingVoice ? 'Click to stop recording & analyze with SenseVoice' : 'Speak into microphone (SenseVoice emotion recognition)'}
+                        >
+                          <Mic size={15} className={recordingVoice ? 'animate-bounce' : ''} />
                         </button>
-                      ) : (
-                        <button type="submit" className="send-button" disabled={!draft.trim() || !connected || !preferences.model} aria-label="Send message" title="Send message" data-testid="button-send-message">
-                          <ArrowUp size={17} />
-                        </button>
-                      )}
+
+                        {streaming ? (
+                          <button type="button" className="send-button stop" onClick={stopGeneration} aria-label="Stop generation" title="Stop generation" data-testid="button-stop-generation">
+                            <Square size={13} fill="currentColor" />
+                          </button>
+                        ) : (
+                          <button type="submit" className="send-button" disabled={!draft.trim() || !connected || !preferences.model} aria-label="Send message" title="Send message" data-testid="button-send-message">
+                            <ArrowUp size={17} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </form>
                   <div className="composer-foot">
@@ -1241,20 +1463,102 @@ function Workspace() {
             </Route>
 
             {/* ============================================================ */}
-            {/* VOICE (BETA) SURFACE - 15 ENGLISH VOICES FROM LU             */}
+            {/* NODE BANANA WORKFLOWS (shrimbly/node-banana)                */}
+            {/* ============================================================ */}
+            <Route path="/workflows">
+              <section className="settings-page" style={{ maxWidth: 1140 }}>
+                <WorkflowStudio
+                  workflows={nodeBananaWorkflows}
+                  selectedId={selectedWorkflowId}
+                  onSelectWorkflow={(id) => setSelectedWorkflowId(id)}
+                  prompt={workflowPrompt}
+                  onPromptChange={(p) => setWorkflowPrompt(p)}
+                  onRunWorkflow={handleRunWorkflow}
+                  running={runningWorkflow}
+                  result={workflowResult}
+                  statusMsg={studioStatusMsg}
+                  onSelectPersonaImage={(url) => {
+                    setPreviewImageUrl(url);
+                    setLocation('/create');
+                  }}
+                />
+              </section>
+            </Route>
+
+            {/* ============================================================ */}
+            {/* VOICE SURFACE - SENSEVOICE & 15 NATURAL NEURAL VOICES        */}
             {/* ============================================================ */}
             <Route path="/voice">
-              <section className="settings-page">
+              <section className="settings-page" style={{ maxWidth: 1040 }}>
                 <div className="settings-heading">
-                  <div className="eyebrow"><Mic size={13} />Locally Uncensored Voice Engine</div>
-                  <h1>Voice Studio <span style={{ fontSize: 14, background: '#e3efe5', color: '#427257', padding: '3px 9px', borderRadius: 99, verticalAlign: 'middle' }}>Beta</span></h1>
-                  <p>Speak in 15 English voices from Locally Uncensored (`VOICE.md`). Synthesizes audio locally on your PC.</p>
+                  <div className="eyebrow"><Mic size={13} />QwenAudio SenseVoice + Microsoft Natural Neural Voices</div>
+                  <h1>Voice &amp; Speech Emotion Studio</h1>
+                  <p>
+                    Multimodal emotional voice intelligence. Uses <strong>QwenAudio/SenseVoice</strong> for ultra-fast Automatic Speech Recognition (ASR), Speech Emotion Recognition (SER), and audio event detection (laughter, sighs), paired with studio-grade Natural Neural voices for lifelike warmth and human breath.
+                  </p>
                 </div>
 
                 <div className="settings-grid">
+                  {/* SenseVoice Audio Understanding Card */}
+                  <section className="settings-card wide" style={{ background: '#f5faf7', border: '1px solid #cce5d6' }}>
+                    <h2 className="card-title"><span className="card-icon"><Sparkles size={15} /></span>QwenAudio SenseVoice: Speech Emotion &amp; Audio Event Recognition</h2>
+                    <p className="card-desc">
+                      Non-autoregressive speech foundation model running in ~70ms. Detects emotional nuance (happy, sad, affectionate, surprised, passionate) and audio events (laughter, sigh, applause) from your voice to drive deep emotional companion empathy.
+                    </p>
+
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={handleToggleVoiceRecord}
+                        disabled={processingVoice}
+                        style={{
+                          padding: '10px 18px',
+                          borderRadius: 8,
+                          border: 0,
+                          background: recordingVoice ? '#d93838' : '#336049',
+                          color: '#fff',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 7,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Mic size={14} className={recordingVoice ? 'animate-pulse' : ''} />
+                        <span>{recordingVoice ? 'Stop & Analyze Audio' : processingVoice ? 'Processing SenseVoice…' : 'Record Mic with SenseVoice'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSenseVoiceSimulate}
+                        disabled={processingVoice}
+                        style={{
+                          padding: '10px 16px',
+                          borderRadius: 8,
+                          border: '1px solid #bfdacf',
+                          background: '#ffffff',
+                          color: '#2d523e',
+                          fontSize: 12,
+                          fontWeight: 650,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Test Sample Emotion Note
+                      </button>
+
+                      {detectedEmotion && (
+                        <div style={{ padding: '6px 14px', borderRadius: 8, background: '#e0f2e5', border: '1px solid #a3d9b4', color: '#1a4e2e', fontSize: 12 }}>
+                          Detected Emotion: <strong>{detectedEmotion.emotion}</strong> ({detectedEmotion.nuance})
+                          {detectedEmotion.events.length > 0 && <span style={{ marginLeft: 6, fontWeight: 600 }}>· Events: [{detectedEmotion.events.join(', ')}]</span>}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
                   <section className="settings-card wide">
-                    <h2 className="card-title"><span className="card-icon"><Volume2 size={15} /></span>Synthesize Speech Locally</h2>
-                    <p className="card-desc">Pick any of the 15 English voices (Alba is default) and test local voice synthesis.</p>
+                    <h2 className="card-title"><span className="card-icon"><Volume2 size={15} /></span>Lifelike Studio Neural Voices (15 English Profiles)</h2>
+                    <p className="card-desc">Broadcast-quality Microsoft Natural Neural speech with genuine human warmth, cadence, and breath.</p>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(95px, 1fr))', gap: 8, marginBottom: 16 }}>
                       {(luStatus?.voice.voices || DEFAULT_VOICES).map((voiceName) => (

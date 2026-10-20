@@ -47,3 +47,10 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Repositories & Generated Media
+node-banana-repo/
+data/media/*.wav
+data/media/*.mp3
+data/media/talking-*.svg
+!data/media/default-persona.webp
