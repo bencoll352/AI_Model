@@ -490,7 +490,7 @@ function generateCyberpunkSvgAvatar(prompt: string, title = "AI Girl"): string {
 </svg>`;
 }
 
-async function generateImageWithComfyOrFallback(prompt: string, name = "AI Girl"): Promise<{ image_url: string; provider: string }> {
+async function generateImageWithComfyOrFallback(prompt: string, name = "AI Girl", wardrobe?: string): Promise<{ image_url: string; provider: string; wardrobe?: string }> {
   const comfyRunning = await isComfyRunning();
   if (comfyRunning) {
     try {
@@ -573,7 +573,7 @@ async function generateImageWithComfyOrFallback(prompt: string, name = "AI Girl"
                     const buf = Buffer.from(await imgFetch.arrayBuffer());
                     const filename = `comfy-${randomUUID()}.png`;
                     writeFileSync(path.join(MEDIA_DIR, filename), buf);
-                    return { image_url: `/api/lu/media/${filename}`, provider: "comfyui" };
+                    return { image_url: `/api/lu/media/${filename}`, provider: "comfyui", wardrobe };
                   }
                 }
               }
@@ -594,11 +594,11 @@ async function generateImageWithComfyOrFallback(prompt: string, name = "AI Girl"
     const nodeBananaScript = path.join(scriptsDir, "node_banana_engine.py");
     if (existsSync(nodeBananaScript)) {
       const sanitizedPrompt = prompt.replace(/"/g, '\\"').replace(/\r?\n/g, " ");
-      const cmd = `python "${nodeBananaScript}" "${sanitizedPrompt}" "${targetPath}" flux`;
+      const cmd = `python "${nodeBananaScript}" "${sanitizedPrompt}" "${targetPath}" flux "${wardrobe || ''}"`;
       const resJson = execSync(cmd, { timeout: 45000, encoding: "utf-8" });
       const parsed = JSON.parse(resJson.trim().split("\n").pop() || "{}");
       if (parsed.status === "success" && existsSync(targetPath)) {
-        return { image_url: `/api/lu/media/${filename}`, provider: parsed.provider || "node_banana_flux" };
+        return { image_url: `/api/lu/media/${filename}`, provider: parsed.provider || "node_banana_flux", wardrobe };
       }
     }
   } catch (err) {
@@ -651,7 +651,7 @@ function generateSineWaveWavBuffer(text: string): Buffer {
   return buffer;
 }
 
-async function generateLocalVoiceFile(text: string, voice = "Alba"): Promise<{ voice_url: string; provider: "edge_natural_neural_tts" | "windows_sapi_tts" | "local_synth_wav" }> {
+async function generateLocalVoiceFile(text: string, voice = "Alba", style = "regular"): Promise<{ voice_url: string; provider: "edge_natural_neural_tts" | "windows_sapi_tts" | "local_synth_wav" }> {
   const mp3Filename = `voice-${randomUUID()}.mp3`;
   const mp3TargetPath = path.join(MEDIA_DIR, mp3Filename);
 
@@ -661,7 +661,7 @@ async function generateLocalVoiceFile(text: string, voice = "Alba"): Promise<{ v
     const ttsScript = path.join(scriptsDir, "tts_generator.py");
     if (existsSync(ttsScript)) {
       const sanitizedText = text.replace(/"/g, '\\"').replace(/\r?\n/g, " ").slice(0, 500);
-      const cmd = `python "${ttsScript}" "${sanitizedText}" "${mp3TargetPath}" "${voice}"`;
+      const cmd = `python "${ttsScript}" "${sanitizedText}" "${mp3TargetPath}" "${voice}" "${style || 'regular'}"`;
       execSync(cmd, { timeout: 15000, stdio: "ignore" });
       if (existsSync(mp3TargetPath) && statSync(mp3TargetPath).size > 100) {
         return { voice_url: `/api/lu/media/${mp3Filename}`, provider: "edge_natural_neural_tts" };
@@ -949,16 +949,89 @@ router.post("/lu/generate-art", async (req, res) => {
   res.json(result);
 });
 
-// Generate AI Voice (Local TTS)
+// Generate AI Voice (Local TTS with emotional style tuning)
 router.post("/lu/generate-voice", async (req, res) => {
-  const { text, voice } = req.body as { text?: string; voice?: string };
+  const { text, voice, style } = req.body as { text?: string; voice?: string; style?: string };
   if (!text || !text.trim()) {
     res.status(400).json({ error: "Text is required" });
     return;
   }
-  const result = await generateLocalVoiceFile(text.trim(), voice || "Alba");
+  const result = await generateLocalVoiceFile(text.trim(), voice || "Alba", style || "regular");
   res.json(result);
 });
+
+// Wardrobe Styling Presets
+export const WARDROBE_PRESETS = [
+  { id: "evening_glamour", name: "Evening Glamour", description: "Silk emerald-green backless gown with diamond accents, gala banquet atmosphere", icon: "Sparkles" },
+  { id: "casual_chic", name: "Casual Chic", description: "Oversized cream off-shoulder cashmere sweater with dark denim, cozy modern lounge", icon: "Coffee" },
+  { id: "cyberpunk_street", name: "Cyberpunk Street", description: "Sleek cropped black tactical leather jacket with neon bioluminescent accents", icon: "Zap" },
+  { id: "summer_resort", name: "Summer Resort", description: "Breezy floral linen sundress, sun hat, sunlit Mediterranean coastal balcony", icon: "Sun" },
+  { id: "haute_couture", name: "Haute Couture", description: "Sharp tailored Parisian runway blazer dress, high-fashion editorial styling", icon: "Crown" },
+  { id: "athletic_lounge", name: "Athletic Lounge", description: "Sleek minimalist rib-knit athletic lounge set, soft morning sunbeam lighting", icon: "Activity" },
+  { id: "vintage_elegance", name: "Vintage Elegance", description: "Timeless 1950s Audrey Hepburn black cocktail dress with pearls, Parisian café", icon: "Heart" },
+];
+
+// List available AI Wardrobe & Outfit styles
+router.get("/lu/wardrobe/styles", (_req, res) => {
+  res.json({ styles: WARDROBE_PRESETS });
+});
+
+// Transform persona outfit & wardrobe (Virtual Stylist)
+router.post("/lu/wardrobe/transform", async (req, res) => {
+  const { character_id, prompt, wardrobe, name } = req.body as {
+    character_id?: number | string;
+    prompt?: string;
+    wardrobe?: string;
+    name?: string;
+  };
+
+  if (!wardrobe) {
+    res.status(400).json({ error: "Wardrobe style is required" });
+    return;
+  }
+
+  let basePrompt = prompt;
+  let charName = name || "AI Girl";
+
+  if (character_id) {
+    const list = await listAiGirls();
+    const found = list.find((c) => String(c.id) === String(character_id));
+    if (found) {
+      basePrompt = basePrompt || found.prompt;
+      charName = found.name;
+    }
+  }
+
+  if (!basePrompt) {
+    basePrompt = `Photorealistic portrait of ${charName}, charismatic, beautiful natural lighting`;
+  }
+
+  const result = await generateImageWithComfyOrFallback(basePrompt, charName, wardrobe);
+
+  if (character_id) {
+    const existing = readLocalAiGirls();
+    const idx = existing.findIndex((c) => String(c.id) === String(character_id));
+    if (idx !== -1) {
+      existing[idx].image_url = result.image_url;
+      writeLocalAiGirls(existing);
+    }
+    if (db) {
+      try {
+        await db.update(aiGirlsTable).set({ image_url: result.image_url }).where(eq(aiGirlsTable.id, Number(character_id)));
+      } catch {
+        /* local json updated */
+      }
+    }
+  }
+
+  res.json({
+    ok: true,
+    image_url: result.image_url,
+    provider: result.provider,
+    wardrobe,
+  });
+});
+
 
 // List all AI Girl personas
 router.get("/lu/ai-girls", async (_req, res) => {

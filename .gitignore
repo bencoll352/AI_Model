@@ -54,3 +54,6 @@ data/media/*.wav
 data/media/*.mp3
 data/media/talking-*.svg
 !data/media/default-persona.webp
+cloudflared.exe
+__pycache__/
+*.pyc

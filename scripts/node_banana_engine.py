@@ -16,8 +16,22 @@ NEGATIVE_PROMPT = (
     "deformed, bad anatomy, bad eyes, extra fingers, missing limbs, watermark, text"
 )
 
-def run_node_banana_pipeline(prompt: str, output_path: str, model: str = "flux"):
-    enhanced_prompt = f"{prompt.strip()}{PHOTOREAL_SUFFIX}"
+WARDROBE_STYLES = {
+    "evening_glamour": "wearing a stunning silk emerald-green backless evening gown, elegant diamond necklace, gala banquet terrace, soft golden hour lighting",
+    "casual_chic": "wearing an oversized cream knitted off-shoulder cashmere sweater and dark denim jeans, cozy modern lounge, warm aesthetic",
+    "cyberpunk_street": "wearing a sleek futuristic black leather cropped biker jacket with subtle bioluminescent accents, high-fashion techwear, neon city rain bokeh",
+    "summer_resort": "wearing a breezy floral linen sundress, sun hat, sunlit Mediterranean coastal balcony overlooking the sea",
+    "haute_couture": "wearing a sharp avant-garde Parisian tailored blazer dress, high-fashion editorial styling, minimalist architecture background",
+    "athletic_lounge": "wearing a sleek minimalist athletic rib-knit lounge set, golden hour soft morning sunbeam lighting",
+    "vintage_elegance": "wearing a classic 1950s Audrey Hepburn inspired black cocktail dress with pearls, timeless Parisian café setting",
+}
+
+def run_node_banana_pipeline(prompt: str, output_path: str, model: str = "flux", wardrobe: str = None):
+    outfit_desc = WARDROBE_STYLES.get(wardrobe.lower()) if wardrobe else None
+    if outfit_desc:
+        enhanced_prompt = f"{prompt.strip()}, {outfit_desc}{PHOTOREAL_SUFFIX}"
+    else:
+        enhanced_prompt = f"{prompt.strip()}{PHOTOREAL_SUFFIX}"
     
     # Try G4F FLUX-1-Dev / SD-3.5-Large pipeline
     models_to_try = [model, "flux", "flux-dev", "sd-3.5-large"]
@@ -43,6 +57,7 @@ def run_node_banana_pipeline(prompt: str, output_path: str, model: str = "flux")
                         "status": "success",
                         "output_path": output_path,
                         "provider": f"node_banana_{m}",
+                        "wardrobe": wardrobe,
                         "prompt": enhanced_prompt
                     }
         except Exception as e:
@@ -61,6 +76,7 @@ def run_node_banana_pipeline(prompt: str, output_path: str, model: str = "flux")
                 "status": "success",
                 "output_path": output_path,
                 "provider": "node_banana_pollinations_flux",
+                "wardrobe": wardrobe,
                 "prompt": enhanced_prompt
             }
     except Exception as e:
@@ -75,6 +91,7 @@ def run_node_banana_pipeline(prompt: str, output_path: str, model: str = "flux")
             "status": "success",
             "output_path": output_path,
             "provider": "node_banana_photoreal_cache",
+            "wardrobe": wardrobe,
             "prompt": enhanced_prompt
         }
 
@@ -86,12 +103,14 @@ def run_node_banana_pipeline(prompt: str, output_path: str, model: str = "flux")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print(json.dumps({"error": "Usage: python node_banana_engine.py <prompt> <output_path> [model]"}))
+        print(json.dumps({"error": "Usage: python node_banana_engine.py <prompt> <output_path> [model] [wardrobe]"}))
         sys.exit(1)
         
     in_prompt = sys.argv[1]
     in_out_path = sys.argv[2]
-    in_model = sys.argv[3] if len(sys.argv) > 3 else "flux"
+    in_model = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else "flux"
+    in_wardrobe = sys.argv[4] if len(sys.argv) > 4 else None
     
-    res = run_node_banana_pipeline(in_prompt, in_out_path, in_model)
+    res = run_node_banana_pipeline(in_prompt, in_out_path, in_model, in_wardrobe)
     print(json.dumps(res))
+

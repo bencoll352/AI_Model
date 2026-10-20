@@ -5,8 +5,11 @@ import {
   Image as ImageIcon, LockKeyhole, MessageSquare, Mic, Play, Plus, RefreshCw,
   Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Square, Trash2, Users,
   Volume2, WifiOff, FolderDown, Copy, Check, UploadCloud, AlertCircle, ExternalLink,
+  Palette, Shirt, Heart,
 } from 'lucide-react';
 import { WorkflowStudio, type WorkflowTemplate } from './components/WorkflowStudio';
+import { WardrobeStudio } from './components/WardrobeStudio';
+
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string; createdAt: string };
 type Conversation = { id: string; title: string; createdAt: string; updatedAt: string; messages: Message[]; personaId?: number };
@@ -177,6 +180,7 @@ function Workspace() {
   const [workflowPrompt, setWorkflowPrompt] = useState('Lifelike photorealistic AI companion with natural smile in modern loft');
   const [runningWorkflow, setRunningWorkflow] = useState(false);
   const [workflowResult, setWorkflowResult] = useState<{ imageUrl?: string; provider?: string; enhancedPrompt?: string } | null>(null);
+  const [selectedVoiceStyle, setSelectedVoiceStyle] = useState<string>('regular');
 
 
   // Character.AI Importer state
@@ -608,12 +612,13 @@ function Workspace() {
       const res = await fetch('/api/lu/generate-voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: voiceText, voice: selectedVoice }),
+        body: JSON.stringify({ text: voiceText, voice: selectedVoice, style: selectedVoiceStyle }),
       });
       const data = (await res.json()) as { voice_url?: string; provider?: string; error?: string };
       if (!res.ok || !data.voice_url) throw new Error(data.error || 'Failed to generate voice');
       setPreviewVoiceUrl(data.voice_url);
-      setStudioStatusMsg(`Voice synthesized (${data.provider === 'windows_sapi_tts' ? 'Local Windows SAPI TTS' : 'Local Synth WAV'}).`);
+      setStudioStatusMsg(`Voice synthesized (${data.provider || 'Edge Natural Neural TTS'}).`);
+
     } catch (err) {
       setStudioStatusMsg(err instanceof Error ? err.message : 'Voice generation error');
     } finally {
@@ -881,8 +886,9 @@ function Workspace() {
 
   const pageTitle =
     location === '/create' ? 'Create & Personas (LU Studio)' :
+    location === '/wardrobe' ? 'AI Wardrobe & Outfit Stylist (Node-Banana)' :
     location === '/workflows' ? 'Node Banana Workflows (shrimbly/node-banana)' :
-    location === '/voice' ? 'Voice & SenseVoice (Affective Audio)' :
+    location === '/voice' ? 'Voice & Personalities (Affective Audio)' :
     location === '/import' ? 'Character.AI Importer' :
     location === '/settings' ? 'Settings & Supabase' : 'Chat';
 
@@ -929,15 +935,19 @@ function Workspace() {
           <Link href="/create" className={`nav-link ${location === '/create' ? 'selected' : ''}`} data-testid="link-create">
             <Sparkles size={15} />Create & AI Girls
           </Link>
+          <Link href="/wardrobe" className={`nav-link ${location === '/wardrobe' ? 'selected' : ''}`} data-testid="link-wardrobe">
+            <Palette size={15} />Wardrobe Stylist
+          </Link>
           <Link href="/workflows" className={`nav-link ${location === '/workflows' ? 'selected' : ''}`} data-testid="link-workflows">
             <SlidersHorizontal size={15} />Node Banana Workflows
           </Link>
           <Link href="/voice" className={`nav-link ${location === '/voice' ? 'selected' : ''}`} data-testid="link-voice">
-            <Mic size={15} />Voice (SenseVoice)
+            <Mic size={15} />Voice &amp; Personalities
           </Link>
           <Link href="/import" className={`nav-link ${location === '/import' ? 'selected' : ''}`} data-testid="link-import">
             <FolderDown size={15} />Import C.AI
           </Link>
+
           <Link href="/settings" className={`nav-link ${location === '/settings' ? 'selected' : ''}`} data-testid="link-settings">
             <Settings2 size={15} />Settings
           </Link>
@@ -1486,6 +1496,15 @@ function Workspace() {
             </Route>
 
             {/* ============================================================ */}
+            {/* WARDROBE & OUTFIT STYLIST STUDIO (NODE-BANANA FLUX)           */}
+            {/* ============================================================ */}
+            <Route path="/wardrobe">
+              <section className="settings-page" style={{ maxWidth: 1140 }}>
+                <WardrobeStudio onPersonaUpdated={loadLuStudio} />
+              </section>
+            </Route>
+
+            {/* ============================================================ */}
             {/* VOICE SURFACE - SENSEVOICE & 15 NATURAL NEURAL VOICES        */}
             {/* ============================================================ */}
             <Route path="/voice">
@@ -1494,11 +1513,130 @@ function Workspace() {
                   <div className="eyebrow"><Mic size={13} />QwenAudio SenseVoice + Microsoft Natural Neural Voices</div>
                   <h1>Voice &amp; Speech Emotion Studio</h1>
                   <p>
-                    Multimodal emotional voice intelligence. Uses <strong>QwenAudio/SenseVoice</strong> for ultra-fast Automatic Speech Recognition (ASR), Speech Emotion Recognition (SER), and audio event detection (laughter, sighs), paired with studio-grade Natural Neural voices for lifelike warmth and human breath.
+                    Multimodal emotional voice intelligence. Uses <strong>QwenAudio/SenseVoice</strong> for ultra-fast Automatic Speech Recognition (ASR), Speech Emotion Recognition (SER), and audio event detection, paired with studio-grade Natural Neural voices for lifelike warmth, intimate whispers, and emotional prosody.
                   </p>
                 </div>
 
                 <div className="settings-grid">
+                  {/* Romantic & Playful Personalities Vocal Showcase */}
+                  <section className="settings-card wide" style={{ background: '#fdf9f4', border: '1px solid #ebd9c8' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h2 className="card-title" style={{ margin: 0 }}>
+                        <span className="card-icon" style={{ background: '#fcefe8', color: '#b95333' }}><Heart size={15} /></span>
+                        Romantic &amp; Playful Personalities Showcase
+                      </h2>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#9d4a2d', background: '#fae8de', padding: '3px 8px', borderRadius: 6 }}>
+                        5 Curated Vocal Archetypes
+                      </span>
+                    </div>
+                    <p className="card-desc" style={{ marginBottom: 16 }}>
+                      Lifelike speech synthesis tuned with emotional prosody—from close-mic whisper dynamics to witty banter and romantic cadence. Audition their voices or jump directly into chat.
+                    </p>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+                      {personas.slice(0, 5).map((p) => (
+                        <div
+                          key={p.id}
+                          style={{
+                            background: '#ffffff',
+                            borderRadius: 12,
+                            padding: 14,
+                            border: '1px solid #ece4db',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 10,
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                            <img
+                              src={p.image_url || '/api/lu/media/persona-sienna.webp'}
+                              alt={p.name}
+                              style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'cover', border: '1px solid #e2dad0' }}
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = '/api/lu/media/persona-sienna.webp';
+                              }}
+                            />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <strong style={{ fontSize: 14, color: '#1f2e2b' }}>{p.name}</strong>
+                                <span style={{ fontSize: 9, padding: '2px 6px', background: '#f5eee6', color: '#8d4a28', borderRadius: 4, fontWeight: 700 }}>
+                                  {p.persona_type || 'Companion'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 11, color: '#687773', marginTop: 2 }}>
+                                Voice: <strong>{p.voice_id || 'Alba'}</strong> · Tone: <em>{p.voice_style || 'natural'}</em>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ fontSize: 11, color: '#465551', fontStyle: 'italic', background: '#fbfaf8', padding: '6px 10px', borderRadius: 6, border: '1px solid #f0ece5' }}>
+                            "{p.voice_text || 'Hello there, nice to meet you.'}"
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
+                            {p.voice_url ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewVoiceUrl(p.voice_url);
+                                }}
+                                style={{
+                                  flex: 1,
+                                  padding: '7px 10px',
+                                  borderRadius: 7,
+                                  border: '1px solid #dbcfc4',
+                                  background: '#faf6f0',
+                                  color: '#344540',
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: 5,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <Play size={12} />
+                                <span>Audition Voice</span>
+                              </button>
+                            ) : null}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updatePreference('activePersonaId', p.id);
+                                if (p.voice_id) {
+                                  setSelectedVoice(p.voice_id);
+                                  updatePreference('activeVoice', p.voice_id);
+                                }
+                                setLocation('/');
+                              }}
+                              style={{
+                                flex: 1,
+                                padding: '7px 10px',
+                                borderRadius: 7,
+                                border: 0,
+                                background: '#336049',
+                                color: '#ffffff',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 5,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <MessageSquare size={12} />
+                              <span>Chat with Her</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
                   {/* SenseVoice Audio Understanding Card */}
                   <section className="settings-card wide" style={{ background: '#f5faf7', border: '1px solid #cce5d6' }}>
                     <h2 className="card-title"><span className="card-icon"><Sparkles size={15} /></span>QwenAudio SenseVoice: Speech Emotion &amp; Audio Event Recognition</h2>
@@ -1557,10 +1695,46 @@ function Workspace() {
                   </section>
 
                   <section className="settings-card wide">
-                    <h2 className="card-title"><span className="card-icon"><Volume2 size={15} /></span>Lifelike Studio Neural Voices (15 English Profiles)</h2>
-                    <p className="card-desc">Broadcast-quality Microsoft Natural Neural speech with genuine human warmth, cadence, and breath.</p>
+                    <h2 className="card-title"><span className="card-icon"><Volume2 size={15} /></span>Lifelike Studio Neural Voices &amp; Emotional Prosody</h2>
+                    <p className="card-desc">Broadcast-quality Microsoft Natural Neural speech with genuine human warmth, cadence, intimate whisper, and breath dynamics.</p>
+
+                    {/* Emotional Prosody Presets */}
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#687773', marginBottom: 8 }}>
+                        Emotional Tone &amp; Vocal Cadence
+                      </label>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {[
+                          { id: 'regular', name: 'Balanced Natural', desc: 'Standard cadence' },
+                          { id: 'whisper', name: 'Intimate Whisper', desc: 'Soft close-mic (-12% rate, -3Hz)' },
+                          { id: 'playful', name: 'Playful & Teasing', desc: 'Upbeat banter (+8% rate, +4Hz)' },
+                          { id: 'sultry', name: 'Sultry & Slow', desc: 'Deep warm tone (-8% rate, -4Hz)' },
+                          { id: 'affectionate', name: 'Warm & Affectionate', desc: 'Gentle & caring (-5% rate, +1Hz)' },
+                          { id: 'confident', name: 'Bold & Confident', desc: 'Charismatic (+3% rate, -1Hz)' },
+                        ].map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setSelectedVoiceStyle(t.id)}
+                            style={{
+                              padding: '7px 12px',
+                              borderRadius: 8,
+                              border: selectedVoiceStyle === t.id ? '2px solid #336049' : '1px solid #dcd9cf',
+                              background: selectedVoiceStyle === t.id ? '#eaf4ee' : '#faf9f5',
+                              color: selectedVoiceStyle === t.id ? '#1b4d36' : '#334440',
+                              fontSize: 11,
+                              fontWeight: selectedVoiceStyle === t.id ? 800 : 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {t.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(95px, 1fr))', gap: 8, marginBottom: 16 }}>
+
                       {(luStatus?.voice.voices || DEFAULT_VOICES).map((voiceName) => (
                         <button
                           key={voiceName}
