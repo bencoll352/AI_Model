@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { db, aiGirlsTable, type AiGirl, type InsertAiGirl } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { parseCaiExport, type ParsedCharacter } from "../lib/cai-parser";
 
 const router: IRouter = Router();
 
@@ -770,6 +771,95 @@ router.delete("/lu/ai-girls/:id", async (req, res) => {
   const existing = readLocalAiGirls().filter((item) => Number(item.id) !== id);
   writeLocalAiGirls(existing);
   res.json({ ok: true });
+});
+
+// Character.AI Exporter - Bookmarklet & Extension details
+router.get("/lu/cai/bookmarklet", (_req, res) => {
+  res.json({
+    bookmarklet: "javascript:(function(){const s=document.createElement('script');s.src='https://trymorse.ai/cai-exporter.js';document.body.appendChild(s);})();",
+    instructions: "Drag this bookmarklet to your bookmarks bar. Open Character.AI, log in, and click the bookmark to export your bots, chats, and personas into a JSON file.",
+    scriptUrl: "https://trymorse.ai/cai-exporter.js",
+    extensionUrl: "https://github.com/trymorse/character-ai-exporter",
+  });
+});
+
+// Character.AI Exporter - Parse & Preview export JSON
+router.post("/lu/cai/parse", (req, res) => {
+  try {
+    const rawData = req.body.data !== undefined ? req.body.data : req.body;
+    const parsed = parseCaiExport(rawData, MEDIA_DIR);
+    res.json({ success: true, ...parsed });
+  } catch (err: any) {
+    logger.error({ err }, "Failed to parse Character.AI export");
+    res.status(400).json({ error: err?.message || "Invalid Character.AI export JSON" });
+  }
+});
+
+// Character.AI Exporter - Import selected characters and return hydrated conversations
+router.post("/lu/cai/import", async (req, res) => {
+  try {
+    const characters: ParsedCharacter[] = req.body.characters || [];
+    if (!Array.isArray(characters) || characters.length === 0) {
+      res.status(400).json({ error: "No characters provided to import" });
+      return;
+    }
+
+    const importedGirls: AiGirl[] = [];
+    const allHydratedConversations: any[] = [];
+
+    for (const char of characters) {
+      const voiceId = char.voiceId || "Alba";
+      const voiceText = (char.voiceText || `Hello, I am ${char.name}`).trim();
+
+      // Generate voice file if possible
+      let voiceUrl = "";
+      try {
+        const ttsResult = await generateLocalVoiceFile(voiceText, voiceId);
+        voiceUrl = ttsResult.voice_url;
+      } catch (err) {
+        logger.warn({ err }, "Could not generate voice for imported character");
+        voiceUrl = "/api/lu/media/voice-4e80b2a6-7ce5-4706-8de3-fe024362e192.wav";
+      }
+
+      const saved = await insertAiGirl({
+        name: char.name,
+        description: char.description || "Imported from Character.AI",
+        image_url: char.imageUrl || "/api/lu/media/default-persona.svg",
+        voice_url: voiceUrl,
+        prompt: char.prompt || "",
+        voice_text: voiceText,
+        voice_id: voiceId,
+        model: "Qwen 3.8 27B Uncensored",
+      });
+
+      importedGirls.push(saved.girl);
+
+      // Hydrate all associated conversations with this character's new database ID
+      if (Array.isArray(char.chats)) {
+        for (const chat of char.chats) {
+          allHydratedConversations.push({
+            id: chat.id || randomUUID(),
+            title: chat.title || `${char.name} Chat`,
+            createdAt: chat.createdAt || new Date().toISOString(),
+            updatedAt: chat.updatedAt || new Date().toISOString(),
+            personaId: saved.girl.id,
+            memory: chat.memory,
+            messages: chat.messages || [],
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      count: importedGirls.length,
+      importedGirls,
+      conversations: allHydratedConversations,
+    });
+  } catch (err: any) {
+    logger.error({ err }, "Failed to import Character.AI data");
+    res.status(500).json({ error: err?.message || "Internal server error during import" });
+  }
 });
 
 export default router;

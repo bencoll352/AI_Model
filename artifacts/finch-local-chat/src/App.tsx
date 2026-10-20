@@ -4,7 +4,7 @@ import {
   Activity, ArrowUp, Bot, CheckCircle2, CircleHelp, Cpu, Database, FileText,
   Image as ImageIcon, LockKeyhole, MessageSquare, Mic, Play, Plus, RefreshCw,
   Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Square, Trash2, Users,
-  Volume2, WifiOff,
+  Volume2, WifiOff, FolderDown, Copy, Check, UploadCloud, AlertCircle, ExternalLink,
 } from 'lucide-react';
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string; createdAt: string };
@@ -115,6 +115,136 @@ function Workspace() {
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
   const [supabaseSavedMsg, setSupabaseSavedMsg] = useState<string | null>(null);
+
+  // Character.AI Importer state
+  const [caiPreview, setCaiPreview] = useState<{
+    source: string;
+    exportedAt: string;
+    user: { id?: string; username?: string; name?: string } | null;
+    personas: Array<{ title?: string; definition?: string }>;
+    characters: Array<{
+      externalId: string;
+      name: string;
+      description: string;
+      prompt: string;
+      voiceText: string;
+      voiceId: string;
+      imageUrl: string;
+      chats: Array<{
+        id: string;
+        title: string;
+        createdAt: string;
+        updatedAt: string;
+        messages: Message[];
+      }>;
+    }>;
+    totalChats: number;
+    totalMessages: number;
+  } | null>(null);
+  const [selectedChars, setSelectedChars] = useState<Record<string, boolean>>({});
+  const [importVoiceChoices, setImportVoiceChoices] = useState<Record<string, string>>({});
+  const [parsingCai, setParsingCai] = useState(false);
+  const [importingCai, setImportingCai] = useState(false);
+  const [caiStatusMsg, setCaiStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [bookmarkletCopied, setBookmarkletCopied] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const BOOKMARKLET_CODE = `javascript:(function(){const s=document.createElement('script');s.src='https://trymorse.ai/cai-exporter.js';document.body.appendChild(s);})();`;
+
+  const copyBookmarklet = () => {
+    navigator.clipboard.writeText(BOOKMARKLET_CODE);
+    setBookmarkletCopied(true);
+    setTimeout(() => setBookmarkletCopied(false), 3000);
+  };
+
+  const handleCaiFile = async (file: File) => {
+    setCaiStatusMsg(null);
+    setParsingCai(true);
+    try {
+      const text = await file.text();
+      const parsedData = JSON.parse(text);
+      const res = await fetch('/api/lu/cai/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: parsedData }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to parse Character.AI export file');
+      }
+      const data = await res.json();
+      setCaiPreview(data);
+      const initialSelected: Record<string, boolean> = {};
+      const initialVoices: Record<string, string> = {};
+      for (const char of data.characters || []) {
+        initialSelected[char.externalId] = true;
+        initialVoices[char.externalId] = char.voiceId || 'Alba';
+      }
+      setSelectedChars(initialSelected);
+      setImportVoiceChoices(initialVoices);
+      setCaiStatusMsg({
+        type: 'info',
+        text: `Export parsed successfully! Found ${data.characters?.length || 0} characters, ${data.totalChats || 0} chats, and ${data.totalMessages || 0} messages.`,
+      });
+    } catch (err: any) {
+      setCaiStatusMsg({ type: 'error', text: err?.message || 'Failed to read or parse file' });
+    } finally {
+      setParsingCai(false);
+    }
+  };
+
+  const handleExecuteImport = async () => {
+    if (!caiPreview || !caiPreview.characters) return;
+    const toImport = caiPreview.characters
+      .filter((c) => selectedChars[c.externalId])
+      .map((c) => ({
+        ...c,
+        voiceId: importVoiceChoices[c.externalId] || c.voiceId || 'Alba',
+      }));
+
+    if (toImport.length === 0) {
+      setCaiStatusMsg({ type: 'error', text: 'Please select at least one character to import.' });
+      return;
+    }
+
+    setImportingCai(true);
+    setCaiStatusMsg({ type: 'info', text: `Importing ${toImport.length} character(s) and restoring chats...` });
+
+    try {
+      const res = await fetch('/api/lu/cai/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ characters: toImport }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Import request failed');
+      }
+
+      const result = await res.json();
+      await loadLuStudio();
+
+      if (Array.isArray(result.conversations) && result.conversations.length > 0) {
+        setConversations((prev) => {
+          const prevMap = new Map(prev.map((c) => [c.id, c]));
+          for (const conv of result.conversations) {
+            prevMap.set(conv.id, conv);
+          }
+          return Array.from(prevMap.values());
+        });
+      }
+
+      setCaiStatusMsg({
+        type: 'success',
+        text: `Successfully imported ${result.count} character(s) and restored ${result.conversations?.length || 0} conversation history entries!`,
+      });
+    } catch (err: any) {
+      setCaiStatusMsg({ type: 'error', text: err?.message || 'Error executing import' });
+    } finally {
+      setImportingCai(false);
+    }
+  };
 
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -446,6 +576,7 @@ function Workspace() {
   const pageTitle =
     location === '/create' ? 'Create & Personas (LU Studio)' :
     location === '/voice' ? 'Voice (Beta)' :
+    location === '/import' ? 'Character.AI Importer' :
     location === '/settings' ? 'Settings & Supabase' : 'Chat';
 
   return (
@@ -493,6 +624,9 @@ function Workspace() {
           </Link>
           <Link href="/voice" className={`nav-link ${location === '/voice' ? 'selected' : ''}`} data-testid="link-voice">
             <Mic size={15} />Voice (Beta)
+          </Link>
+          <Link href="/import" className={`nav-link ${location === '/import' ? 'selected' : ''}`} data-testid="link-import">
+            <FolderDown size={15} />Import C.AI
           </Link>
           <Link href="/settings" className={`nav-link ${location === '/settings' ? 'selected' : ''}`} data-testid="link-settings">
             <Settings2 size={15} />Settings
@@ -595,6 +729,10 @@ function Workspace() {
                           <button className="hint" onClick={() => setLocation('/create')}>
                             <Sparkles size={12} style={{ display: 'inline', marginRight: 6 }} />
                             Open AI Girl & Image Studio
+                          </button>
+                          <button className="hint" onClick={() => setLocation('/import')}>
+                            <FolderDown size={12} style={{ display: 'inline', marginRight: 6 }} />
+                            Import from Character.AI
                           </button>
                           <button className="hint" onClick={() => setLocation('/voice')}>
                             <Mic size={12} style={{ display: 'inline', marginRight: 6 }} />
@@ -955,6 +1093,273 @@ function Workspace() {
             {/* ============================================================ */}
             {/* SETTINGS & SUPABASE CONFIGURATION                            */}
             {/* ============================================================ */}
+            {/* ============================================================ */}
+            {/* CHARACTER.AI IMPORTER & MIGRATION HUB                         */}
+            {/* ============================================================ */}
+            <Route path="/import">
+              <section className="settings-page" style={{ maxWidth: 1100 }}>
+                <div className="settings-heading">
+                  <div className="eyebrow"><FolderDown size={13} />Data Migration</div>
+                  <h1>Character.AI Importer</h1>
+                  <p>Save your Character.AI bots, chats, and personas with one click, and import them directly into your local offline studio.</p>
+                </div>
+
+                <div className="settings-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))' }}>
+                  {/* STEP 1: BOOKMARKLET / EXTENSION GUIDE */}
+                  <section className="settings-card">
+                    <h2 className="card-title">
+                      <span className="card-icon"><Copy size={15} /></span>
+                      1. Export from Character.AI
+                    </h2>
+                    <p className="card-desc">
+                      Use the open-source exporter script from <strong>trymorse/character-ai-exporter</strong>. It runs entirely inside your browser tab on character.ai.
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ background: '#f5f7f5', padding: 12, borderRadius: 8, border: '1px solid #e1e7e1', fontSize: 12, lineHeight: 1.5 }}>
+                        <strong>Option A: 1-Click Bookmarklet</strong><br />
+                        Copy the code below, create a new browser bookmark, and paste this as the URL. Then navigate to <code>character.ai</code>, log in, and click your bookmark!
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          className="model-select"
+                          readOnly
+                          value={BOOKMARKLET_CODE}
+                          style={{ flex: 1, fontSize: 11, fontFamily: 'monospace' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={copyBookmarklet}
+                          style={{
+                            padding: '8px 14px',
+                            borderRadius: 8,
+                            border: 0,
+                            background: bookmarkletCopied ? '#3b6e52' : '#527d67',
+                            color: '#fff',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {bookmarkletCopied ? <Check size={13} /> : <Copy size={13} />}
+                          {bookmarkletCopied ? 'Copied!' : 'Copy'}
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+                        <a
+                          href="https://github.com/trymorse/character-ai-exporter"
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ fontSize: 11, color: '#527d67', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <ExternalLink size={12} />
+                          View Move to Morse extension on GitHub
+                        </a>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* STEP 2: FILE UPLOAD & PARSER */}
+                  <section className="settings-card">
+                    <h2 className="card-title">
+                      <span className="card-icon"><UploadCloud size={15} /></span>
+                      2. Drop Export JSON File
+                    </h2>
+                    <p className="card-desc">
+                      Select or drop your <code>character-ai-export-*.json</code> file here to extract and preview its contents.
+                    </p>
+
+                    <div
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) void handleCaiFile(file);
+                      }}
+                      onClick={() => fileInputRef.current?.click()}
+                      style={{
+                        border: '2px dashed #b9cbb9',
+                        borderRadius: 10,
+                        padding: '30px 20px',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        background: '#f9faf9',
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json,application/json"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void handleCaiFile(file);
+                        }}
+                      />
+                      <UploadCloud size={30} style={{ color: '#527d67', margin: '0 auto 8px' }} />
+                      <div style={{ fontWeight: 600, fontSize: 13, color: '#273431' }}>
+                        {parsingCai ? 'Parsing export file...' : 'Click to select or drag & drop export file'}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#72817e', marginTop: 4 }}>
+                        Accepts morse.cai-export v1 JSON files
+                      </div>
+                    </div>
+
+                    {caiStatusMsg && (
+                      <div
+                        style={{
+                          marginTop: 12,
+                          padding: '9px 12px',
+                          borderRadius: 7,
+                          fontSize: 11,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          background:
+                            caiStatusMsg.type === 'error' ? '#fdeeed' :
+                            caiStatusMsg.type === 'success' ? '#eef7f0' : '#f0f4f8',
+                          color:
+                            caiStatusMsg.type === 'error' ? '#a32b26' :
+                            caiStatusMsg.type === 'success' ? '#2d6a4f' : '#234e70',
+                          border: `1px solid ${
+                            caiStatusMsg.type === 'error' ? '#f5c6cb' :
+                            caiStatusMsg.type === 'success' ? '#c3e6cb' : '#bee5eb'
+                          }`,
+                        }}
+                      >
+                        <AlertCircle size={14} />
+                        <span>{caiStatusMsg.text}</span>
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+                {/* STEP 3: PREVIEW & SELECTION */}
+                {caiPreview && (
+                  <div style={{ marginTop: 24 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+                      <div>
+                        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: '#1f2a27' }}>
+                          Extracted Characters & Chats ({caiPreview.characters?.length || 0} characters found)
+                        </h2>
+                        <div style={{ fontSize: 12, color: '#72817e', marginTop: 4 }}>
+                          Source: {caiPreview.source} · Exported: {new Date(caiPreview.exportedAt).toLocaleDateString()} · Total Chats: {caiPreview.totalChats} · Total Messages: {caiPreview.totalMessages}
+                          {caiPreview.user?.name ? ` · Account: ${caiPreview.user.name}` : ''}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const all: Record<string, boolean> = {};
+                            caiPreview.characters.forEach((c) => { all[c.externalId] = true; });
+                            setSelectedChars(all);
+                          }}
+                          style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #d0d7d0', background: '#fff', fontSize: 11, cursor: 'pointer' }}
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedChars({})}
+                          style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #d0d7d0', background: '#fff', fontSize: 11, cursor: 'pointer' }}
+                        >
+                          Deselect All
+                        </button>
+                        <button
+                          type="button"
+                          disabled={importingCai}
+                          onClick={handleExecuteImport}
+                          style={{
+                            padding: '8px 18px',
+                            borderRadius: 7,
+                            border: 0,
+                            background: '#527d67',
+                            color: '#fff',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: importingCai ? 'not-allowed' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                        >
+                          <FolderDown size={14} />
+                          {importingCai ? 'Importing...' : 'Import Selected into Studio'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+                      {caiPreview.characters?.map((char) => {
+                        const isSelected = Boolean(selectedChars[char.externalId]);
+                        return (
+                          <div
+                            key={char.externalId}
+                            onClick={() => setSelectedChars((prev) => ({ ...prev, [char.externalId]: !prev[char.externalId] }))}
+                            style={{
+                              background: isSelected ? '#f5faf5' : '#fff',
+                              border: `1.5px solid ${isSelected ? '#527d67' : '#e1e7e1'}`,
+                              borderRadius: 10,
+                              padding: 14,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              gap: 12,
+                              alignItems: 'flex-start',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              style={{ marginTop: 4, cursor: 'pointer', accentColor: '#527d67' }}
+                            />
+                            <img
+                              src={char.imageUrl || '/api/lu/media/default-persona.svg'}
+                              alt={char.name}
+                              style={{ width: 50, height: 50, borderRadius: 8, objectFit: 'cover', background: '#eee' }}
+                            />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                <strong style={{ fontSize: 14, color: '#1f2a27' }}>{char.name}</strong>
+                                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#e8efe8', color: '#476356', fontWeight: 600 }}>
+                                  {char.chats?.length || 0} chats
+                                </span>
+                              </div>
+                              <p style={{ fontSize: 11, color: '#687774', margin: '4px 0 8px', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                                {char.description || char.prompt || 'No description'}
+                              </p>
+
+                              <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: 10, color: '#72817e' }}>Voice:</span>
+                                <select
+                                  value={importVoiceChoices[char.externalId] || 'Alba'}
+                                  onChange={(e) => setImportVoiceChoices((prev) => ({ ...prev, [char.externalId]: e.target.value }))}
+                                  style={{ fontSize: 10, padding: '3px 6px', borderRadius: 4, border: '1px solid #d0d7d0', background: '#fff' }}
+                                >
+                                  {DEFAULT_VOICES.map((v) => (
+                                    <option key={v} value={v}>{v}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </section>
+            </Route>
+
             <Route path="/settings">
               <section className="settings-page">
                 <div className="settings-heading">

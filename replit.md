@@ -15,6 +15,10 @@ Full-stack local AI workspace combining **[bencoll352/AI_Model](https://github.c
    - Interactive voice selector and local speech synthesis tester for all 15 Locally Uncensored voices.
 4. **Python Persona Generator (`scripts/ai_girl_generator.py`)**
    - Ready-to-run Python script implementing `generate_ai_art(prompt)`, `generate_ai_voice(text)`, and `insert_ai_girl_data(name, description, image_url, voice_url)` with Supabase + local API server sync.
+5. **Character.AI Importer (`/import`)**
+   - Integrates with **[trymorse/character-ai-exporter](https://github.com/trymorse/character-ai-exporter)** to import Character.AI bots, definitions, avatars, and multi-turn chat logs.
+   - Automatically parses `morse.cai-export` v1 JSON archives, decodes base64 avatars into `data/media/`, and maps bots into `ai_girls` with selectable voices.
+   - Restores message chronology, author roles, greetings, and chat memories directly inside Finch Local Chat.
 
 ## Run & Operate
 
