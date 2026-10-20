@@ -578,3 +578,71 @@ button { cursor: pointer; }
     inset: -1px;
   }
 }
+
+/* HacxGPT Reasoning Trace (<think>) Styles */
+.reasoning-trace {
+  margin: 6px 0 10px;
+  background: #eae7dd;
+  border: 1px solid #dcd5c5;
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #4b5d63;
+  transition: all 0.2s ease;
+}
+.reasoning-trace[open] {
+  background: #f1ede3;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+}
+.reasoning-trace summary {
+  cursor: pointer;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #61737a;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
+  outline: none;
+}
+.reasoning-trace summary:hover {
+  color: #2b3e46;
+}
+.reasoning-content {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #cfc7b5;
+  font-style: italic;
+  font-size: 11.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  color: #55676e;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.thinking-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #52896a;
+  animation: pulse-glow 1.4s infinite;
+}
+@keyframes pulse-glow {
+  0% { transform: scale(0.9); opacity: 0.5; box-shadow: 0 0 0 0 rgba(82, 137, 106, 0.4); }
+  50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 0 4px rgba(82, 137, 106, 0); }
+  100% { transform: scale(0.9); opacity: 0.5; box-shadow: 0 0 0 0 rgba(82, 137, 106, 0); }
+}
+
+/* Talking Avatar & LipSync Preview */
+.avatar-pulsing {
+  border: 2px solid #66d9b8;
+  box-shadow: 0 0 14px rgba(102, 217, 184, 0.45);
+  animation: avatar-breathe 2.4s ease-in-out infinite;
+}
+@keyframes avatar-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+

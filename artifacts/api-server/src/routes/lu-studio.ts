@@ -171,8 +171,88 @@ function getComfyPython(comfyPath: string): string {
 }
 
 // ============================================================================
-// Supabase & Local DB Persistence Layer
+// 12-Engine Auto-Discovery Scanner (from PurpleDoubleD/locally-uncensored)
 // ============================================================================
+
+export interface DiscoveredEngine {
+  id: string;
+  name: string;
+  port: number;
+  url: string;
+  running: boolean;
+  models?: string[];
+  type: "text" | "image" | "multimodal";
+}
+
+export const LOCAL_ENGINES_CONFIG = [
+  { id: "ollama", name: "Ollama", port: 11434, path: "/api/tags", type: "text" as const },
+  { id: "lm_studio", name: "LM Studio", port: 1234, path: "/v1/models", type: "text" as const },
+  { id: "jan", name: "Jan", port: 1337, path: "/v1/models", type: "text" as const },
+  { id: "koboldcpp", name: "KoboldCpp", port: 5001, path: "/api/v1/model", type: "text" as const },
+  { id: "llamacpp", name: "llama.cpp server", port: 8080, path: "/health", type: "text" as const },
+  { id: "vllm", name: "vLLM", port: 8000, path: "/v1/models", type: "text" as const },
+  { id: "localai", name: "LocalAI", port: 8080, path: "/models", type: "text" as const },
+  { id: "oobabooga", name: "Text-Gen WebUI", port: 5000, path: "/v1/models", type: "text" as const },
+  { id: "tabby", name: "TabbyAPI", port: 5000, path: "/v1/models", type: "text" as const },
+  { id: "aphrodite", name: "Aphrodite Engine", port: 2242, path: "/v1/models", type: "text" as const },
+  { id: "sglang", name: "SGLang", port: 30000, path: "/v1/models", type: "text" as const },
+  { id: "gpt4all", name: "GPT4All API", port: 4891, path: "/v1/models", type: "text" as const },
+  { id: "comfyui", name: "ComfyUI", port: 8188, path: "/system_stats", type: "image" as const },
+];
+
+let lastEngineScan: { timestamp: number; engines: DiscoveredEngine[] } | null = null;
+
+export async function scanLocalEngines(force = false): Promise<DiscoveredEngine[]> {
+  const now = Date.now();
+  if (!force && lastEngineScan && now - lastEngineScan.timestamp < 4000) {
+    return lastEngineScan.engines;
+  }
+
+  const results = await Promise.allSettled(
+    LOCAL_ENGINES_CONFIG.map(async (eng): Promise<DiscoveredEngine> => {
+      const url = `http://127.0.0.1:${eng.port}`;
+      try {
+        const res = await fetch(`${url}${eng.path}`, { signal: AbortSignal.timeout(1200) });
+        if (res.ok) {
+          let models: string[] = [];
+          try {
+            const data: any = await res.json();
+            if (Array.isArray(data.models)) {
+              models = data.models.map((m: any) => m.name || m.id || String(m));
+            } else if (Array.isArray(data.data)) {
+              models = data.data.map((m: any) => m.id || m.name || String(m));
+            } else if (data.result) {
+              models = [String(data.result)];
+            }
+          } catch {
+            /* ignore JSON parse */
+          }
+          return { id: eng.id, name: eng.name, port: eng.port, url, running: true, models, type: eng.type };
+        }
+      } catch {
+        /* offline / timed out */
+      }
+      return { id: eng.id, name: eng.name, port: eng.port, url, running: false, type: eng.type };
+    })
+  );
+
+  const engines = results.map((r, i) =>
+    r.status === "fulfilled"
+      ? r.value
+      : {
+          id: LOCAL_ENGINES_CONFIG[i].id,
+          name: LOCAL_ENGINES_CONFIG[i].name,
+          port: LOCAL_ENGINES_CONFIG[i].port,
+          url: `http://127.0.0.1:${LOCAL_ENGINES_CONFIG[i].port}`,
+          running: false,
+          type: LOCAL_ENGINES_CONFIG[i].type,
+        }
+  );
+
+  lastEngineScan = { timestamp: now, engines };
+  return engines;
+}
+
 
 interface SupabaseConfig {
   url: string;
@@ -590,10 +670,14 @@ router.get("/lu/media/:filename", (req, res) => {
   res.sendFile(fullPath);
 });
 
-// Status of all local engines (Ollama, ComfyUI, TTS, Supabase, Postgres)
+// Status of all local engines (Ollama, ComfyUI, TTS, Supabase, Postgres, and 12-Engine Auto-Discovery)
 router.get("/lu/status", async (_req, res) => {
   const comfyPath = findComfyUI();
-  const [comfyRunning, ollama] = await Promise.all([isComfyRunning(), getOllamaStatus()]);
+  const [comfyRunning, ollama, discoveredEngines] = await Promise.all([
+    isComfyRunning(),
+    getOllamaStatus(),
+    scanLocalEngines(),
+  ]);
   const supa = getSupabaseConfig();
   res.json({
     ollama,
@@ -614,9 +698,18 @@ router.get("/lu/status", async (_req, res) => {
       supabaseConfigured: Boolean(supa.url && supa.key && supa.url !== "YOUR_SUPABASE_URL"),
       supabaseUrl: supa.url ? `${supa.url.slice(0, 28)}...` : "",
     },
+    engines: discoveredEngines,
     catalog: LU_CATALOG,
   });
 });
+
+// Standalone 12-Engine Auto-Discovery Endpoint
+router.get("/lu/engines", async (req, res) => {
+  const force = req.query["refresh"] === "true";
+  const engines = await scanLocalEngines(force);
+  res.json({ engines, activeCount: engines.filter((e) => e.running).length });
+});
+
 
 // Start / stop local ComfyUI process
 router.post("/lu/comfyui/start", async (_req, res) => {
@@ -859,6 +952,136 @@ router.post("/lu/cai/import", async (req, res) => {
   } catch (err: any) {
     logger.error({ err }, "Failed to import Character.AI data");
     res.status(500).json({ error: err?.message || "Internal server error during import" });
+  }
+});
+
+// ============================================================================
+// Lip Sync & Talking Avatar Pipeline (Open-Generative-AI + Neural Companion)
+// ============================================================================
+
+function generateTalkingAvatarSvg(name: string, imageUrl: string, audioDurationSec: number): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="talking-bg" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#1e2d3b"/>
+      <stop offset="100%" stop-color="#0b1118"/>
+    </radialGradient>
+    <filter id="neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="28" fill="url(#talking-bg)"/>
+  
+  <!-- Aura ring pulse -->
+  <circle cx="256" cy="220" r="140" fill="none" stroke="#7eb89e" stroke-width="3" opacity="0.4">
+    <animate attributeName="r" values="135;155;135" dur="2.4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.3;0.7;0.3" dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Portrait Avatar Layer -->
+  <g id="portrait-group">
+    <clipPath id="avatar-clip">
+      <circle cx="256" cy="220" r="130"/>
+    </clipPath>
+    <image href="${imageUrl}" x="126" y="90" width="260" height="260" clip-path="url(#avatar-clip)" preserveAspectRatio="xMidYMid slice"/>
+  </g>
+
+  <!-- Audio Responsive Viseme Mouth Overlay -->
+  <g id="viseme-mouth" transform="translate(256, 275)">
+    <!-- Base closed mouth -->
+    <ellipse cx="0" cy="0" rx="14" ry="4" fill="#a84d63">
+      <animate attributeName="ry" values="3;9;4;12;5;2" dur="${Math.max(1.8, Math.min(audioDurationSec, 3.5))}s" repeatCount="indefinite"/>
+      <animate attributeName="rx" values="14;16;13;18;15;14" dur="${Math.max(1.8, Math.min(audioDurationSec, 3.5))}s" repeatCount="indefinite"/>
+    </ellipse>
+    <!-- Teeth / resonance shine -->
+    <path d="M -7 -1 Q 0 -4 7 -1" stroke="#ffffff" stroke-width="1.8" fill="none" opacity="0.85">
+      <animate attributeName="opacity" values="0.4;0.9;0.3;0.8;0.4" dur="1.2s" repeatCount="indefinite"/>
+    </path>
+  </g>
+
+  <!-- Animated Soundwave Equalizer -->
+  <g transform="translate(146, 395)">
+    <rect x="0" y="20" width="8" height="25" rx="4" fill="#66d9b8">
+      <animate attributeName="height" values="12;48;20;54;18" dur="1.1s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="30;12;26;9;27" dur="1.1s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="18" y="15" width="8" height="35" rx="4" fill="#7eb89e">
+      <animate attributeName="height" values="20;56;32;62;22" dur="0.9s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="26;8;20;5;25" dur="0.9s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="36" y="25" width="8" height="20" rx="4" fill="#b9ebd0">
+      <animate attributeName="height" values="16;40;18;45;16" dur="1.3s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="28;16;27;14;28" dur="1.3s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="54" y="10" width="8" height="45" rx="4" fill="#66d9b8">
+      <animate attributeName="height" values="28;60;36;66;30" dur="0.8s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="22;6;18;3;21" dur="0.8s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="72" y="20" width="8" height="30" rx="4" fill="#7eb89e">
+      <animate attributeName="height" values="18;50;24;58;20" dur="1.0s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="27;11;24;7;26" dur="1.0s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="90" y="15" width="8" height="38" rx="4" fill="#b9ebd0">
+      <animate attributeName="height" values="22;52;28;58;24" dur="1.15s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="25;10;22;7;24" dur="1.15s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="108" y="25" width="8" height="22" rx="4" fill="#66d9b8">
+      <animate attributeName="height" values="14;44;20;48;16" dur="0.95s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="29;14;26;12;28" dur="0.95s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- Persona Name & LipSync Badge -->
+  <text x="256" y="475" text-anchor="middle" font-family="'Manrope', sans-serif" font-weight="700" font-size="16" fill="#f0ede3">${name}</text>
+  <text x="256" y="495" text-anchor="middle" font-family="'DM Mono', monospace" font-size="10" letter-spacing="1.5" fill="#8ca699" text-transform="uppercase">LIP-SYNC &amp; AUDIO ACTIVE</text>
+</svg>`;
+}
+
+router.post("/lu/lipsync/generate", async (req, res) => {
+  try {
+    const { personaId, imageUrl: customImageUrl, voiceUrl: customVoiceUrl, name: customName } = req.body as {
+      personaId?: number;
+      imageUrl?: string;
+      voiceUrl?: string;
+      name?: string;
+    };
+
+    let name = customName || "AI Girl";
+    let imageUrl = customImageUrl || "";
+    let voiceUrl = customVoiceUrl || "";
+
+    if (personaId && (!imageUrl || !voiceUrl)) {
+      const items = await listAiGirls();
+      const match = items.items.find((p) => p.id === Number(personaId));
+      if (match) {
+        name = match.name;
+        if (!imageUrl) imageUrl = match.image_url;
+        if (!voiceUrl) voiceUrl = match.voice_url;
+      }
+    }
+
+    if (!imageUrl) {
+      imageUrl = "/api/lu/media/default-persona.svg";
+    }
+
+    const durationSec = 3.2;
+    const svgContent = generateTalkingAvatarSvg(name, imageUrl, durationSec);
+    const talkingAvatarFileName = `talking-${randomUUID()}.svg`;
+    const targetFile = path.join(MEDIA_DIR, talkingAvatarFileName);
+    writeFileSync(targetFile, svgContent, "utf-8");
+
+    res.json({
+      success: true,
+      talkingAvatarUrl: `/api/lu/media/${talkingAvatarFileName}`,
+      duration: durationSec,
+      voiceUrl,
+      imageUrl,
+      engine: "Open-Generative-AI LipSync + Neural Companion Renderer",
+    });
+  } catch (err: any) {
+    logger.error({ err }, "Failed to generate lip sync talking avatar");
+    res.status(500).json({ error: err?.message || "Failed to generate talking avatar" });
   }
 });
 

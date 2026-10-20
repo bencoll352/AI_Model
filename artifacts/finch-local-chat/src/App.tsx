@@ -31,6 +31,7 @@ type LuStatus = {
   comfyui: { installed: boolean; path: string | null; running: boolean; url: string; logs: string[] };
   voice: { available: boolean; engine: string; voices: string[] };
   database: { postgresConfigured: boolean; supabaseConfigured: boolean; supabaseUrl: string };
+  engines?: Array<{ id: string; name: string; port: number; url: string; running: boolean; models?: string[]; type: string }>;
   catalog: {
     text: Array<{ name: string; tag: string; size: string; vram: string; notes: string }>;
     image: Array<{ name: string; vram: string; notes: string }>;
@@ -83,6 +84,27 @@ function formatBytes(bytes: number) {
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1_000_000).toFixed(0)} MB`;
 }
 
+function parseReasoningTrace(content: string): { thinking: string | null; response: string; isThinking: boolean } {
+  if (!content) return { thinking: null, response: '', isThinking: false };
+
+  // Match closed <think>...</think>
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/i);
+  if (thinkMatch) {
+    const thinking = thinkMatch[1].trim();
+    const response = content.replace(/<think>[\s\S]*?<\/think>/i, '').trim();
+    return { thinking, response, isThinking: false };
+  }
+
+  // Match unclosed <think>... (streaming mode)
+  if (content.toLowerCase().startsWith('<think>')) {
+    const thinking = content.slice(7).trim();
+    return { thinking, response: '', isThinking: true };
+  }
+
+  return { thinking: null, response: content, isThinking: false };
+}
+
+
 function Workspace() {
   const [location, setLocation] = useLocation();
   const [conversations, setConversations] = useState<Conversation[]>(readConversations);
@@ -115,6 +137,11 @@ function Workspace() {
   const [supabaseUrl, setSupabaseUrl] = useState('');
   const [supabaseKey, setSupabaseKey] = useState('');
   const [supabaseSavedMsg, setSupabaseSavedMsg] = useState<string | null>(null);
+
+  // Talking Avatar & LipSync state
+  const [talkingAvatarMap, setTalkingAvatarMap] = useState<Record<number, string>>({});
+  const [generatingLipSyncId, setGeneratingLipSyncId] = useState<number | null>(null);
+
 
   // Character.AI Importer state
   const [caiPreview, setCaiPreview] = useState<{
@@ -545,6 +572,31 @@ function Workspace() {
     await loadLuStudio();
   };
 
+  const handleGenerateLipSync = async (girl: AiGirlPersona) => {
+    setGeneratingLipSyncId(girl.id);
+    try {
+      const res = await fetch('/api/lu/lipsync/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personaId: girl.id,
+          name: girl.name,
+          imageUrl: girl.image_url,
+          voiceUrl: girl.voice_url,
+        }),
+      });
+      const data = (await res.json()) as { talkingAvatarUrl?: string };
+      if (data.talkingAvatarUrl) {
+        setTalkingAvatarMap((prev) => ({ ...prev, [girl.id]: data.talkingAvatarUrl! }));
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setGeneratingLipSyncId(null);
+    }
+  };
+
+
   const handleSaveSupabaseConfig = async (e: FormEvent) => {
     e.preventDefault();
     const res = await fetch('/api/lu/supabase-config', {
@@ -703,13 +755,31 @@ function Workspace() {
                               <div className="message-meta">
                                 {message.role === 'user' ? 'YOU' : (activePersona?.name.toUpperCase() || 'FINCH')} · {formatTime(message.createdAt)}
                               </div>
-                              {message.content ? (
-                                <div className={`message-content ${message.role === 'user' ? 'user-content' : ''}`}>
-                                  {message.content}
-                                </div>
-                              ) : (
-                                streaming && <div className="typing" data-testid="status-generating">Thinking locally…</div>
-                              )}
+                              {message.role === 'user' ? (
+                                <div className="message-content user-content">{message.content}</div>
+                              ) : (() => {
+                                const { thinking, response, isThinking } = parseReasoningTrace(message.content);
+                                return (
+                                  <>
+                                    {thinking && (
+                                      <details className="reasoning-trace" open={isThinking}>
+                                        <summary>
+                                          {isThinking ? <span className="thinking-pulse" /> : <Sparkles size={12} style={{ color: '#52896a' }} />}
+                                          <span>{isThinking ? 'Reasoning in progress…' : 'Reasoning process'}</span>
+                                        </summary>
+                                        <div className="reasoning-content">{thinking}</div>
+                                      </details>
+                                    )}
+                                    {response ? (
+                                      <div className="message-content">{response}</div>
+                                    ) : (
+                                      streaming && !isThinking ? (
+                                        <div className="typing" data-testid="status-generating">Thinking locally…</div>
+                                      ) : null
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           </article>
                         ))}
@@ -954,10 +1024,20 @@ function Workspace() {
                       {personas.map((girl) => (
                         <div key={girl.id} style={{ background: '#f4f1e9', border: '1px solid #dedad0', borderRadius: 11, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                           <div style={{ height: 190, background: '#0e131f', position: 'relative' }}>
-                            <img src={girl.image_url} alt={girl.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img
+                              src={talkingAvatarMap[girl.id] || girl.image_url}
+                              alt={girl.name}
+                              className={talkingAvatarMap[girl.id] ? 'avatar-pulsing' : ''}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
                             <span style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(15,23,42,0.75)', color: '#e2e8f0', padding: '3px 8px', borderRadius: 99, fontSize: 10, fontFamily: 'monospace' }}>
                               Voice: {girl.voice_id || 'Alba'}
                             </span>
+                            {talkingAvatarMap[girl.id] && (
+                              <span style={{ position: 'absolute', bottom: 8, left: 8, background: '#10b981', color: '#064e3b', fontWeight: 800, padding: '2px 7px', borderRadius: 99, fontSize: 9 }}>
+                                LIP-SYNC ACTIVE
+                              </span>
+                            )}
                           </div>
                           <div style={{ padding: 13, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 10 }}>
                             <div>
@@ -967,16 +1047,26 @@ function Workspace() {
                             {girl.voice_url && (
                               <audio controls src={girl.voice_url} style={{ width: '100%', height: 28 }} />
                             )}
-                            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                               <button
                                 type="button"
                                 onClick={() => {
                                   updatePreference('activePersonaId', girl.id);
                                   setLocation('/');
                                 }}
-                                style={{ flex: 1, padding: '7px 10px', borderRadius: 7, border: 0, background: '#527d67', color: '#fff', fontSize: 11, fontWeight: 700 }}
+                                style={{ flex: 1, padding: '7px 8px', borderRadius: 7, border: 0, background: '#527d67', color: '#fff', fontSize: 11, fontWeight: 700 }}
                               >
-                                Chat as {girl.name}
+                                Chat
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleGenerateLipSync(girl)}
+                                disabled={generatingLipSyncId === girl.id}
+                                style={{ padding: '7px 8px', borderRadius: 7, border: '1px solid #c2dbcd', background: '#e5f3eb', color: '#27523c', fontSize: 11, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 4 }}
+                                title="Generate Lip-Sync Talking Avatar"
+                              >
+                                <Sparkles size={12} />
+                                {generatingLipSyncId === girl.id ? 'Syncing…' : 'Lip-Sync'}
                               </button>
                               <button
                                 type="button"
@@ -1401,6 +1491,56 @@ function Workspace() {
                       </button>
                       {supabaseSavedMsg && <div style={{ fontSize: 11, color: '#3b6e52' }}>{supabaseSavedMsg}</div>}
                     </form>
+                  </section>
+
+                  <section className="settings-card wide">
+                    <h2 className="card-title">
+                      <span className="card-icon"><Cpu size={15} /></span>
+                      12-Engine Auto-Discovery (Locally Uncensored)
+                    </h2>
+                    <p className="card-desc">
+                      Automatically scans and detects local AI backends running on your machine (ports 11434, 1234, 1337, 5001, 8080, etc.).
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginTop: 12 }}>
+                      {(luStatus?.engines || [
+                        { name: 'Ollama', port: 11434, running: connected },
+                        { name: 'LM Studio', port: 1234, running: false },
+                        { name: 'Jan', port: 1337, running: false },
+                        { name: 'KoboldCpp', port: 5001, running: false },
+                        { name: 'llama.cpp', port: 8080, running: false },
+                        { name: 'vLLM', port: 8000, running: false },
+                        { name: 'LocalAI', port: 8080, running: false },
+                        { name: 'Text-Gen WebUI', port: 5000, running: false },
+                        { name: 'TabbyAPI', port: 5000, running: false },
+                        { name: 'Aphrodite', port: 2242, running: false },
+                        { name: 'SGLang', port: 30000, running: false },
+                        { name: 'GPT4All API', port: 4891, running: false },
+                        { name: 'ComfyUI', port: 8188, running: Boolean(luStatus?.comfyui.running) },
+                      ]).map((eng: any) => (
+                        <div
+                          key={eng.name}
+                          style={{
+                            background: eng.running ? '#e7f3ec' : '#f5f2ea',
+                            border: `1px solid ${eng.running ? '#a3d4b6' : '#dedad0'}`,
+                            borderRadius: 8,
+                            padding: '8px 12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: eng.running ? '#1e4b33' : '#33444a' }}>
+                              {eng.name}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#7a888c', fontFamily: 'monospace' }}>
+                              :{eng.port}
+                            </div>
+                          </div>
+                          <span className={`status-dot ${eng.running ? 'online' : ''}`} />
+                        </div>
+                      ))}
+                    </div>
                   </section>
 
                   <section className="settings-card wide">
