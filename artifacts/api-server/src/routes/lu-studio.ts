@@ -994,13 +994,14 @@ router.post("/lu/wardrobe/transform", async (req, res) => {
   let charName = name || "AI Girl";
 
   if (character_id) {
-    const list = await listAiGirls();
-    const found = list.find((c) => String(c.id) === String(character_id));
+    const { items: list } = await listAiGirls();
+    const found = (list || []).find((c) => String(c.id) === String(character_id));
     if (found) {
       basePrompt = basePrompt || found.prompt;
       charName = found.name;
     }
   }
+
 
   if (!basePrompt) {
     basePrompt = `Photorealistic portrait of ${charName}, charismatic, beautiful natural lighting`;

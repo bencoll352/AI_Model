@@ -92,12 +92,14 @@ export function WardrobeStudio({ onPersonaUpdated }: { onPersonaUpdated?: () => 
     try {
       const res = await fetch('/api/lu/ai-girls');
       if (res.ok) {
-        const list: Persona[] = await res.json();
+        const raw = await res.json();
+        const list: Persona[] = Array.isArray(raw) ? raw : (raw.items || []);
         setPersonas(list);
         if (list.length > 0 && selectedPersonaId === null) {
           setSelectedPersonaId(list[0].id);
         }
       }
+
     } catch (e) {
       console.error('Failed to load personas for wardrobe studio', e);
     }
